@@ -1,5 +1,6 @@
 # ── AI / Script Generation (Google Gemini - FREE, no credit card) ─────────────
-google-generativeai>=0.7.0
+# NEW SDK: google-genai (not google-generativeai which is the old SDK)
+google-genai>=1.0.0
 
 # ── TTS: Microsoft Edge Neural Voices (100% FREE, no API key) ─────────────────
 edge-tts>=6.1.9
@@ -7,13 +8,15 @@ edge-tts>=6.1.9
 # ── Transcription: Local Whisper (100% FREE, runs on your CPU) ────────────────
 faster-whisper>=1.0.3
 
-# ── Video Editing ──────────────────────────────────────────────────────────────
-moviepy>=1.0.3
+# ── Video Editing (MoviePy 2.x) ────────────────────────────────────────────────
+moviepy>=2.0.0
 Pillow>=10.0.0
 numpy>=1.26.0
-pydub>=0.25.1
 imageio>=2.34.0
 imageio-ffmpeg>=0.4.9
+
+# ── Audio utils ────────────────────────────────────────────────────────────────
+pydub>=0.25.1
 
 # ── YouTube Upload ─────────────────────────────────────────────────────────────
 google-api-python-client>=2.120.0
