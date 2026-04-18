@@ -1,0 +1,44 @@
+# Secrets - NEVER commit these
+.env
+credentials/client_secrets.json
+credentials/youtube_token.json
+credentials/oauth_url.txt
+
+# MoviePy temp files & stray media
+*TEMP_MPY*
+*.mp4
+*.mp3
+*.wav
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Output files (large media)
+output/audio/
+output/video/
+output/final/
+
+# Logs (keep structure, not content)
+logs/*.log
+logs/*.jsonl
+
+# Whisper model cache (large, downloads automatically)
+assets/whisper_models/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Temp/test scripts
+test_gemini.py
+do_oauth.py
+oauth_then_upload.py
