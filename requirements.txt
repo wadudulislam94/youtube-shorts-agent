@@ -2,6 +2,9 @@
 # NEW SDK: google-genai (not google-generativeai which is the old SDK)
 google-genai>=1.0.0
 
+# ── Viral Trend Discovery ──────────────────────────────────────────────────────
+youtube-transcript-api>=0.6.2
+
 # ── TTS: Microsoft Edge Neural Voices (100% FREE, no API key) ─────────────────
 edge-tts>=6.1.9
 

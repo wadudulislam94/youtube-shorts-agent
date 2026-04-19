@@ -23,6 +23,7 @@ LOGS_DIR       = BASE_DIR / "logs"
 # ── API Keys (only 2 required, both free) ─────────────────────────────────────
 GEMINI_API_KEY   = os.getenv("GEMINI_API_KEY", "")
 PIXABAY_API_KEY  = os.getenv("PIXABAY_API_KEY", "")
+YOUTUBE_API_KEY  = os.getenv("YOUTUBE_API_KEY", "")   # For search — NOT for upload (that uses OAuth)
 
 # ── YouTube OAuth ─────────────────────────────────────────────────────────────
 YOUTUBE_CLIENT_SECRETS = os.getenv("YOUTUBE_CLIENT_SECRETS", "credentials/client_secrets.json")

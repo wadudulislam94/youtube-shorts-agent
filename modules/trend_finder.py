@@ -1,17 +1,22 @@
 """
-modules/trend_finder.py — Art & Craft Edition
+modules/trend_finder.py — Viral-First Edition
 ─────────────────────────────────────────────────────────────────────────────
-Step 1: Topic Discovery focused on Craft, Art, and Satisfying DIY content.
+Step 1: Topic Discovery by analyzing REAL viral YouTube Shorts.
 
-Sources (tried in priority order):
-  1. Reddit public JSON — r/crafts, r/oddlysatisfying, r/resin, etc.
-  2. RSS feeds          — art & craft blogs/communities
-  3. Evergreen fallback — curated craft project ideas (always works)
+Strategy:
+  1. Search YouTube Data API for recent Shorts (last 30 days) in the art niche
+  2. Rank by view count — pick from the top 10
+  3. Fetch the transcript of that viral Short using youtube-transcript-api
+  4. Return a ViralReference object containing all metadata + transcript
+
+Fallback chain: YouTube API → Reddit → Evergreen list
 """
 
+import os
 import random
 import re
-import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import requests
@@ -23,18 +28,210 @@ from logger import get_logger
 log = get_logger("TrendFinder")
 
 _HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; YouTubeShortsAgent/2.0; +research)",
-    "Accept": "application/json, text/xml, */*",
+    "User-Agent": "Mozilla/5.0 (compatible; YouTubeShortsAgent/3.0)",
+    "Accept": "application/json",
 }
 
 
-# ── Reddit Public JSON (no API key needed) ────────────────────────────────────
+# ── ViralReference — returned by discover_topic() ─────────────────────────────
 
-def _fetch_reddit(niche_cfg: dict) -> Optional[str]:
-    """Use Reddit's public .json endpoint — no credentials required."""
-    subreddits = niche_cfg.get("subreddits", ["crafts"])
+@dataclass
+class ViralReference:
+    """Holds data about a real viral Short that we're modelling after."""
+    topic: str                      # Human-readable topic name (for logs/SEO)
+    title: str = ""                 # Original viral video title
+    views: int = 0                  # View count
+    likes: int = 0                  # Like count
+    description: str = ""          # Original video description
+    transcript: str = ""           # Full transcript text (if available)
+    video_id: str = ""             # YouTube video ID (for reference)
+    source: str = "fallback"       # "youtube_viral" | "reddit" | "fallback"
+
+    def __str__(self) -> str:
+        """Make this behave as a string so main.py works without changes."""
+        return self.topic
+
+    def has_transcript(self) -> bool:
+        return bool(self.transcript and len(self.transcript.strip()) > 50)
+
+    def viral_context_for_gemini(self) -> str:
+        """Build a rich context block to pass to Gemini."""
+        lines = [f'Viral Video Title: "{self.title}"']
+        if self.views:
+            lines.append(f"Views: {self.views:,} | Likes: {self.likes:,}")
+        if self.has_transcript():
+            # Trim transcript to ~1500 chars to stay in token budget
+            transcript_snippet = self.transcript[:1500].strip()
+            lines.append(f"\nTranscript:\n{transcript_snippet}")
+        elif self.description:
+            lines.append(f"\nDescription: {self.description[:500]}")
+        return "\n".join(lines)
+
+
+# ── YouTube Data API Search ────────────────────────────────────────────────────
+
+# Art/craft niche search queries — rotated to find different viral content
+_VIRAL_SEARCH_QUERIES = {
+    "art": [
+        "satisfying resin art #shorts",
+        "pottery wheel satisfying #shorts",
+        "acrylic pour painting #shorts",
+        "satisfying art process #shorts",
+        "woodworking satisfying #shorts",
+        "clay sculpting satisfying #shorts",
+        "watercolor painting timelapse #shorts",
+        "satisfying craft making #shorts",
+        "oddly satisfying art #shorts",
+        "resin pour satisfying #shorts",
+    ],
+    "facts":       ["mind blowing facts #shorts", "did you know facts #shorts"],
+    "finance":     ["money tips #shorts", "financial advice #shorts"],
+    "motivation":  ["motivation #shorts", "mindset advice #shorts"],
+    "history":     ["history facts #shorts", "historical moments #shorts"],
+    "tech":        ["tech facts #shorts", "AI technology #shorts"],
+}
+
+
+def _youtube_search_viral(niche: str) -> Optional[ViralReference]:
+    """
+    Search YouTube Data API for viral Shorts published in the last 30 days.
+    Returns a ViralReference for the most-viewed result, or None on failure.
+    """
+    api_key = config.YOUTUBE_API_KEY
+    if not api_key:
+        log.warning("YOUTUBE_API_KEY not set — skipping YouTube viral search")
+        return None
+
+    queries = _VIRAL_SEARCH_QUERIES.get(niche, _VIRAL_SEARCH_QUERIES["art"])
+    query   = random.choice(queries)
+
+    # Only look at videos from the last 30 days
+    published_after = (datetime.now(timezone.utc) - timedelta(days=30)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+    try:
+        # Step 1: Search for Shorts
+        search_url = "https://www.googleapis.com/youtube/v3/search"
+        search_params = {
+            "part":           "snippet",
+            "q":              query,
+            "type":           "video",
+            "videoDuration":  "short",   # <= 4 minutes (catches Shorts)
+            "order":          "viewCount",
+            "publishedAfter": published_after,
+            "maxResults":     15,
+            "key":            api_key,
+        }
+        resp = requests.get(search_url, params=search_params, timeout=12)
+        resp.raise_for_status()
+        items = resp.json().get("items", [])
+
+        if not items:
+            log.warning(f"No YouTube results for query: {query}")
+            return None
+
+        # Step 2: Get view/like stats for these videos
+        video_ids = [item["id"]["videoId"] for item in items if "videoId" in item.get("id", {})]
+        stats_url = "https://www.googleapis.com/youtube/v3/videos"
+        stats_params = {
+            "part": "statistics,snippet",
+            "id":   ",".join(video_ids),
+            "key":  api_key,
+        }
+        stats_resp = requests.get(stats_url, params=stats_params, timeout=12)
+        stats_resp.raise_for_status()
+        stats_items = stats_resp.json().get("items", [])
+
+        # Sort by view count descending
+        def get_views(item):
+            return int(item.get("statistics", {}).get("viewCount", 0))
+
+        stats_items.sort(key=get_views, reverse=True)
+
+        # Pick randomly from top 5 to add variety
+        top_items = stats_items[:5]
+        if not top_items:
+            return None
+
+        chosen = random.choice(top_items)
+        video_id   = chosen["id"]
+        snippet    = chosen.get("snippet", {})
+        statistics = chosen.get("statistics", {})
+
+        title       = snippet.get("title", "")
+        description = snippet.get("description", "")[:500]
+        views       = int(statistics.get("viewCount", 0))
+        likes       = int(statistics.get("likeCount", 0))
+
+        log.info(f"🔥 Viral Short found: '{title[:60]}' — {views:,} views")
+
+        # Step 3: Fetch transcript
+        transcript = _fetch_transcript(video_id)
+
+        # Build topic string (cleaned title for use as topic)
+        topic = _clean_title_to_topic(title)
+
+        return ViralReference(
+            topic=topic,
+            title=title,
+            views=views,
+            likes=likes,
+            description=description,
+            transcript=transcript,
+            video_id=video_id,
+            source="youtube_viral",
+        )
+
+    except Exception as e:
+        log.warning(f"YouTube viral search failed: {e}")
+        return None
+
+
+def _fetch_transcript(video_id: str) -> str:
+    """
+    Fetch transcript for a YouTube video using youtube-transcript-api.
+    Returns empty string if not available.
+    """
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
+        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=["en", "en-US", "en-GB"])
+        full_text = " ".join(entry["text"] for entry in transcript_list)
+        log.info(f"📝 Transcript fetched: {len(full_text)} chars")
+        return full_text
+    except ImportError:
+        log.warning("youtube-transcript-api not installed — run: pip install youtube-transcript-api")
+        return ""
+    except Exception as e:
+        log.info(f"No transcript available for {video_id}: {type(e).__name__}")
+        return ""
+
+
+def _clean_title_to_topic(title: str) -> str:
+    """Strip hashtags, emojis, and junk from YouTube titles to get a clean topic."""
+    title = re.sub(r'#\w+', '', title)
+    emoji_re = re.compile(
+        "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF"
+        "\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF"
+        "\U00002702-\U000027B0]+", flags=re.UNICODE)
+    title = emoji_re.sub('', title)
+    title = re.sub(r'\s+', ' ', title).strip()
+    return title if len(title) > 10 else "Satisfying art creation process"
+
+
+# ── Reddit Fallback ────────────────────────────────────────────────────────────
+
+_ART_SUBREDDITS = [
+    "crafts", "oddlysatisfying", "resin", "painting",
+    "woodworking", "pottery", "DIY", "Art", "drawing",
+]
+
+def _fetch_reddit_fallback(niche: str) -> Optional[ViralReference]:
+    """Reddit-based topic discovery as fallback."""
+    niche_cfg  = config.get_niche()
+    subreddits = niche_cfg.get("subreddits", _ART_SUBREDDITS)
     subreddit  = random.choice(subreddits)
-    url = f"https://www.reddit.com/r/{subreddit}/hot.json?limit=30"
+    url = f"https://www.reddit.com/r/{subreddit}/hot.json?limit=25"
 
     try:
         resp = requests.get(url, headers=_HEADERS, timeout=12)
@@ -44,211 +241,79 @@ def _fetch_reddit(niche_cfg: dict) -> Optional[str]:
         candidates = [
             p["data"]["title"]
             for p in posts
-            if p["data"].get("score", 0) > 200
-            and not p["data"].get("stickied", False)
-            and not p["data"].get("distinguished")
-            and 20 < len(p["data"]["title"]) < 200
-            and not p["data"]["title"].lower().startswith("weekly")
-            and not p["data"]["title"].lower().startswith("megathread")
+            if p["data"].get("score", 0) > 100
+            and not p["data"].get("stickied")
+            and 15 < len(p["data"]["title"]) < 150
         ]
 
         if candidates:
-            topic = random.choice(candidates[:12])
-            # Clean up Reddit-isms
-            topic = re.sub(r'^\[OC\]\s*', '', topic, flags=re.IGNORECASE).strip()
-            topic = re.sub(r'^\[.\]\s*', '', topic).strip()
-            log.info(f"📌 Reddit ({subreddit}): {topic[:80]}...")
-            return _craft_topic_from_title(topic, subreddit)
-
+            title = random.choice(candidates[:10])
+            title = re.sub(r'^\[OC\]\s*', '', title, flags=re.IGNORECASE).strip()
+            topic = _clean_title_to_topic(title)
+            log.info(f"📌 Reddit fallback ({subreddit}): {topic[:70]}...")
+            return ViralReference(
+                topic=topic,
+                title=title,
+                source="reddit",
+            )
     except Exception as e:
-        log.warning(f"Reddit fetch failed ({subreddit}): {e}")
-
+        log.warning(f"Reddit fallback failed: {e}")
     return None
 
 
-def _craft_topic_from_title(title: str, subreddit: str) -> str:
-    """Convert a Reddit post title into a usable craft topic."""
-    # If it already sounds like a craft description, use it
-    craft_keywords = [
-        "resin", "pour", "paint", "clay", "pottery", "wood", "carv",
-        "knit", "crochet", "embroider", "sew", "weav", "glaze", "mosaic",
-        "sculpt", "sketch", "watercolor", "acrylic", "oil paint", "origami",
-        "macrame", "candle", "soap", "jewelry", "bead", "felt", "quilt",
-        "block print", "linocut", "engrav", "burn", "leather", "glass",
-    ]
-    if any(kw in title.lower() for kw in craft_keywords):
-        return title
+# ── Evergreen Fallback ─────────────────────────────────────────────────────────
 
-    # Otherwise generate a craft topic from the subreddit context
-    fallbacks_by_sub = {
-        "oddlysatisfying": _random_satisfying_craft(),
-        "crafts": _random_craft_project(),
-        "resin": _random_resin_project(),
-        "painting": _random_painting_project(),
-        "woodworking": _random_woodworking_project(),
-        "pottery": _random_pottery_project(),
-    }
-    return fallbacks_by_sub.get(subreddit, title)
+_FALLBACK_TOPICS = [
+    "Pouring mesmerizing resin ocean art with blue and white pigments",
+    "Throwing a perfect clay bowl on the pottery wheel",
+    "Painting a misty mountain landscape with wet-on-wet watercolor",
+    "Carving intricate patterns into a live-edge wood slab",
+    "Building a glowing epoxy river table with blue resin",
+    "Weaving a colorful macrame wall hanging from scratch",
+    "Speed painting a photorealistic eye with colored pencils",
+    "Creating a stained glass sun-catcher with copper foil technique",
+    "Sculpting a lifelike animal from air-dry clay",
+    "Casting a glowing resin geode coaster with gold leaf veins",
+]
 
-
-# ── RSS Feeds (no API key needed) ─────────────────────────────────────────────
-
-@retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=8))
-def _fetch_rss(niche_cfg: dict) -> Optional[str]:
-    """Parse an art/craft RSS feed and extract a topic."""
-    feeds = niche_cfg.get("rss_feeds", [])
-    if not feeds:
-        return None
-
-    feed_url = random.choice(feeds)
-
-    try:
-        resp = requests.get(feed_url, headers=_HEADERS, timeout=12)
-        resp.raise_for_status()
-
-        root = ET.fromstring(resp.content)
-        titles = []
-
-        for item in root.findall(".//item"):
-            title_el = item.find("title")
-            if title_el is not None and title_el.text:
-                titles.append(title_el.text.strip())
-
-        for entry in root.findall(".//{http://www.w3.org/2005/Atom}entry"):
-            title_el = entry.find("{http://www.w3.org/2005/Atom}title")
-            if title_el is not None and title_el.text:
-                titles.append(title_el.text.strip())
-
-        good = [t for t in titles if 20 < len(t) < 180 and not t.startswith("<")]
-
-        if good:
-            topic = random.choice(good[:10])
-            log.info(f"📰 RSS feed: {topic[:80]}...")
-            return topic
-
-    except Exception as e:
-        log.warning(f"RSS fetch failed ({feed_url}): {e}")
-
-    return None
-
-
-# ── Craft Topic Generators ─────────────────────────────────────────────────────
-
-def _random_satisfying_craft() -> str:
-    return random.choice([
-        "Satisfying resin ocean wave pour with blue and white pigment",
-        "Hypnotic acrylic paint pour creating a galaxy marble effect",
-        "Satisfying kinetic sand cutting and shaping process",
-        "Oddly satisfying pottery wheel shaping a perfect vase",
-        "Mesmerizing fluid art — cells forming with silicone oil",
-    ])
-
-def _random_craft_project() -> str:
-    return random.choice([
-        "Turning a plain canvas into a stunning abstract painting",
-        "Making a hand-stamped leather wallet from scratch",
-        "Creating a macrame wall hanging with natural cotton rope",
-        "Hand-painting intricate patterns on river stones",
-        "Building a miniature terrarium inside a glass bottle",
-    ])
-
-def _random_resin_project() -> str:
-    return random.choice([
-        "Casting a glowing river table with blue epoxy resin",
-        "Pouring clear resin over pressed wildflowers in a tray",
-        "Making a resin ocean art piece with real sand and shells",
-        "Creating a geode-inspired resin coaster with gold leaf",
-        "Casting a translucent resin chessboard with embedded art",
-    ])
-
-def _random_painting_project() -> str:
-    return random.choice([
-        "Painting a misty mountain landscape in one hour with acrylics",
-        "Watercolor cherry blossom tree painted in real time",
-        "Bob Ross style happy little trees painted with a palette knife",
-        "One-stroke rose technique creating a stunning floral canvas",
-        "Speed painting a hyperrealistic portrait with oil paints",
-    ])
-
-def _random_woodworking_project() -> str:
-    return random.choice([
-        "Carving a beautiful spoon from a raw piece of cherry wood",
-        "Building a floating walnut shelf with hidden iron brackets",
-        "Turning a plain wooden bowl on a lathe start to finish",
-        "Crafting an intricate inlaid cutting board with maple and walnut",
-        "Making a hand-carved wooden jewelry box with a hidden compartment",
-    ])
-
-def _random_pottery_project() -> str:
-    return random.choice([
-        "Throwing a perfect tea bowl on the pottery wheel",
-        "Hand-building a rustic ceramic planter with textured walls",
-        "Glazing a porcelain mug with a cosmic blue dip-glaze",
-        "Pulling walls on a large vase from a centered clay mound",
-        "Firing handmade ceramic tiles in a raku kiln",
-    ])
-
-
-# ── Evergreen Fallback (always works, no internet needed) ─────────────────────
-
-FALLBACK_TOPICS = {
-    "art": [
-        "Pouring mesmerizing resin ocean art with blue and white pigments",
-        "Creating a stunning galaxy painting with acrylic pour technique",
-        "Hand-throwing a perfect clay bowl on the pottery wheel",
-        "Painting a misty forest landscape with wet-on-wet watercolor",
-        "Carving intricate patterns into a block of white clay",
-        "Building a glowing epoxy river table with live-edge wood",
-        "Weaving a colorful macrame plant hanger from scratch",
-        "Speed painting a photorealistic eye with colored pencils",
-        "Making handmade soap with swirling natural pigments",
-        "Cutting and polishing a raw amethyst crystal into a gemstone",
-        "Block printing a botanical pattern on linen fabric",
-        "Creating a stained glass sun-catcher with copper foil technique",
-        "Sculpting a lifelike animal from air-dry clay",
-        "Making a hand-bound leather journal from scratch",
-        "Casting a glowing resin geode coaster with gold leaf veins",
-    ],
-    "facts": [  # fallback for other niches
-        "Pouring mesmerizing resin ocean art with blue and white pigments",
-        "Creating a galaxy painting with acrylic pour technique",
-        "Hand-throwing a perfect clay bowl on the pottery wheel",
-    ],
-}
-
-
-def _fallback(niche: str) -> str:
-    topics = FALLBACK_TOPICS.get(niche, FALLBACK_TOPICS["art"])
-    topic = random.choice(topics)
-    log.info(f"🔒 Fallback topic: {topic[:80]}...")
-    return topic
+def _evergreen_fallback() -> ViralReference:
+    topic = random.choice(_FALLBACK_TOPICS)
+    log.info(f"🔒 Evergreen fallback: {topic[:70]}...")
+    return ViralReference(topic=topic, title=topic, source="fallback")
 
 
 # ── Public Interface ───────────────────────────────────────────────────────────
 
-def discover_topic() -> str:
+def discover_topic() -> ViralReference:
     """
-    Discover a craft/art topic. Tries Reddit → RSS → Fallback.
-    Always returns a string, never raises.
+    Discover a viral topic. Tries:
+      1. YouTube viral search (finds real high-view Shorts + transcript)
+      2. Reddit hot posts
+      3. Evergreen fallback (always works)
+
+    Returns a ViralReference. Use str(result) to get the topic string.
     """
-    niche     = config.CONTENT_NICHE
-    niche_cfg = config.get_niche()
+    niche = config.CONTENT_NICHE
+    log.info(f"🔍 Discovering viral topic for niche: [{niche}]")
 
-    log.info(f"🔍 Discovering topic for niche: [{niche}]")
+    # 1. YouTube viral search (primary)
+    ref = _youtube_search_viral(niche)
+    if ref:
+        return ref
 
-    topic = _fetch_reddit(niche_cfg)
-    if topic:
-        return topic
+    # 2. Reddit hot posts (secondary)
+    ref = _fetch_reddit_fallback(niche)
+    if ref:
+        return ref
 
-    try:
-        topic = _fetch_rss(niche_cfg)
-        if topic:
-            return topic
-    except Exception as e:
-        log.warning(f"RSS error: {e}")
-
-    return _fallback(niche)
+    # 3. Evergreen fallback (always works)
+    return _evergreen_fallback()
 
 
 if __name__ == "__main__":
-    print(discover_topic())
+    ref = discover_topic()
+    print(f"\nTopic: {ref.topic}")
+    print(f"Source: {ref.source}")
+    print(f"Views: {ref.views:,}")
+    if ref.has_transcript():
+        print(f"Transcript ({len(ref.transcript)} chars): {ref.transcript[:200]}...")

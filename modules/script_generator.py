@@ -1,15 +1,20 @@
 """
-modules/script_generator.py — Art & Craft Edition
+modules/script_generator.py — Viral Content Strategist Edition
 ─────────────────────────────────────────────────────────────────────────────
-Step 2: Script Generation using Google Gemini.
+Step 2: Script Generation.
 
-Tone: soothing, mesmerizing, satisfying narrator voice.
-Style: trust-the-process art narration — not facts, not news.
+When a ViralReference with a transcript is available, Gemini acts as a
+"Viral Content Strategist" — it analyzes WHY the viral Short worked
+(hook, pacing, retention tactics) and writes a brand-new ORIGINAL script
+that clones those winning tactics without copying the content.
+
+When no transcript is available, falls back to the soothing art narrator mode.
 """
 
 import re
 import json
 from dataclasses import dataclass
+from typing import Union
 
 from google import genai
 from google.genai import types
@@ -32,29 +37,71 @@ class ScriptResult:
     full_script: str
     word_count: int = 0
     estimated_duration_sec: float = 0.0
+    strategy_used: str = "standard"   # "viral_clone" | "standard"
 
     def __post_init__(self):
         self.word_count = len(self.full_script.split())
         self.estimated_duration_sec = self.word_count / 2.3
 
 
-_PROMPT_TEMPLATE = """You are a calming, inspiring narrator for a "satisfying art and craft" YouTube Shorts channel.
+# ── Viral Clone Prompt (used when we have a real viral reference) ──────────────
+
+_VIRAL_PROMPT = """You are a Viral Content Strategist for a YouTube Shorts channel about satisfying art & craft.
+
+I found a real viral YouTube Short that got millions of views. Your job is to:
+1. Analyze WHY it went viral (the hook, pacing, emotional triggers, retention tactics)
+2. Write a completely NEW, ORIGINAL script that uses the SAME psychological tactics
+
+═══════════════════════════════════════════════════════
+VIRAL REFERENCE (DO NOT COPY — ANALYZE ONLY):
+{viral_context}
+═══════════════════════════════════════════════════════
+
+YOUR ANALYSIS TASK:
+- What makes the hook irresistible? (curiosity gap, visual promise, emotional trigger?)
+- What's the pacing? (fast cuts? slow reveal? transformation?)
+- What retention tactic keeps people watching? (before/after? process reveal? "wait for it"?)
+- What emotional payoff does the viewer get? (satisfying, awe, calming?)
+
+YOUR WRITING TASK:
+Write a brand-new 45-60 second voiceover script for a SHORT about THIS topic: "{topic}"
+Use the SAME hook style, pacing, and retention tactics as the viral reference.
+The script must be 100% original — different topic, different words, same viral formula.
+
+Rules:
+- HOOK (2 sentences): Copy the EMOTIONAL STRUCTURE of the viral hook, not the words.
+  Make the viewer NEED to keep watching.
+- BODY (4-5 sentences): Mirror the pacing. If the viral was fast, be punchy. If slow, be soothing.
+  Describe the art/craft process in a way that matches what made the viral video irresistible.
+- CTA (1 sentence): "Follow for more" or "Subscribe for daily art."
+- Total: 90-120 words. Plain spoken English. No hashtags. No asterisks. No markdown. No emojis.
+
+Return ONLY this JSON (no other text):
+{{
+  "hook": "string",
+  "body": "string",
+  "cta": "string",
+  "viral_tactics_used": "1-sentence summary of what viral tactics you applied"
+}}"""
+
+
+# ── Standard Narrator Prompt (fallback when no viral reference) ────────────────
+
+_STANDARD_PROMPT = """You are a calming, inspiring narrator for a "satisfying art and craft" YouTube Shorts channel.
 
 Art/Craft Topic: "{topic}"
 
-Write a soothing, engaging voiceover script for a 45-60 second YouTube Short showing this craft being made.
+Write a soothing, engaging voiceover script for a 45-60 second YouTube Short.
 
 Rules:
 - HOOK (2 sentences): Draw the viewer in instantly. Start with something mesmerizing like:
-  "Watch what happens when...", "There is something magical about...", "From nothing to breathtaking...",
-  "This is how a masterpiece is born...", "Most people have never seen..."
+  "Watch what happens when...", "There is something magical about...", "From nothing to breathtaking..."
   Do NOT start with "Hey guys", "Welcome", or "In this video".
-- BODY (4-5 sentences): Narrate the creation process in present tense. Describe the textures, colors,
-  and satisfying moments of making this piece. Make it feel like the viewer is watching it happen live.
-  Use sensory language — mention the feel of the material, the colors blending, the satisfying sounds.
-- CTA (1 sentence): "Follow for daily art that will make your day better." or "Subscribe — new craft every day."
-- TOTAL: 90-120 words. Plain spoken English. No emojis. No hashtags. No asterisks. No markdown.
-- Tone: calm, soothing, slightly awe-struck. Like a quiet ASMR narrator watching magic happen.
+- BODY (4-5 sentences): Narrate the creation process in present tense. Use sensory language —
+  textures, colors blending, satisfying sounds. Make it feel live.
+- CTA (1 sentence): "Follow for daily art inspiration." or "Subscribe — new craft every day."
+- Total: 90-120 words. Plain spoken English. No hashtags. No asterisks. No markdown. No emojis.
+- Tone: calm, soothing, slightly awe-struck. Like a quiet ASMR narrator.
 
 Return ONLY this JSON (no other text):
 {{
@@ -64,19 +111,42 @@ Return ONLY this JSON (no other text):
 }}"""
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=3, max=15))
-def generate_script(topic: str) -> ScriptResult:
-    """Generate a soothing art narration script using Gemini."""
-    log.info(f"Writing script for: {topic[:70]}...")
+# ── Main Generator ─────────────────────────────────────────────────────────────
 
-    prompt = _PROMPT_TEMPLATE.format(topic=topic)
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=3, max=15))
+def generate_script(topic_or_ref) -> ScriptResult:
+    """
+    Generate a script. Accepts either:
+    - A ViralReference object (uses Viral Content Strategist prompt)
+    - A plain string topic (uses standard narrator prompt)
+    """
+    # Import here to avoid circular imports
+    from modules.trend_finder import ViralReference
+
+    topic = str(topic_or_ref)
+
+    # Decide which prompt to use
+    if isinstance(topic_or_ref, ViralReference) and topic_or_ref.source == "youtube_viral":
+        strategy = "viral_clone"
+        viral_context = topic_or_ref.viral_context_for_gemini()
+        prompt = _VIRAL_PROMPT.format(
+            viral_context=viral_context,
+            topic=topic,
+        )
+        log.info(f"🔥 Viral strategist mode | {topic_or_ref.views:,} views reference")
+    else:
+        strategy = "standard"
+        prompt = _STANDARD_PROMPT.format(topic=topic)
+        log.info(f"🎨 Standard narrator mode")
+
+    log.info(f"Writing script for: {topic[:70]}...")
 
     response = _client.models.generate_content(
         model="gemini-flash-lite-latest",
         contents=prompt,
         config=types.GenerateContentConfig(
-            temperature=0.85,
-            max_output_tokens=512,
+            temperature=0.9,
+            max_output_tokens=600,
             response_mime_type="application/json",
         ),
     )
@@ -93,13 +163,24 @@ def generate_script(topic: str) -> ScriptResult:
     body = _clean(parsed.get("body", ""))
     cta  = _clean(parsed.get("cta", "Follow for daily art inspiration."))
 
+    # Log the viral tactics used (for debugging)
+    if strategy == "viral_clone" and parsed.get("viral_tactics_used"):
+        log.info(f"💡 Tactics: {parsed['viral_tactics_used']}")
+
     if not hook or not body:
         raise ValueError(f"Missing hook/body in: {parsed}")
 
     full_script = f"{hook} {body} {cta}"
-    result = ScriptResult(topic=topic, hook=hook, body=body, cta=cta, full_script=full_script)
+    result = ScriptResult(
+        topic=topic,
+        hook=hook,
+        body=body,
+        cta=cta,
+        full_script=full_script,
+        strategy_used=strategy,
+    )
 
-    log.info(f"Script ready -- {result.word_count} words | ~{result.estimated_duration_sec:.0f}s")
+    log.info(f"Script ready [{strategy}] — {result.word_count} words | ~{result.estimated_duration_sec:.0f}s")
     return result
 
 
@@ -119,6 +200,7 @@ def _clean(text: str) -> str:
 
 
 if __name__ == "__main__":
+    # Quick test with a plain string
     r = generate_script("Pouring resin ocean art with blue and white pigments")
     print(r.full_script)
-    print(f"Words: {r.word_count} | ~{r.estimated_duration_sec:.0f}s")
+    print(f"Strategy: {r.strategy_used} | Words: {r.word_count} | ~{r.estimated_duration_sec:.0f}s")
