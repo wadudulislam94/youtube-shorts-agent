@@ -235,7 +235,7 @@ def _craft_video_query(topic: str, niche_cfg: dict) -> str:
     Build a targeted Pixabay query from the craft topic.
     Falls back to niche config query if no keywords match.
     """
-    topic_lower = topic.lower()
+    topic_lower = str(topic).lower()
 
     for keywords, query in _CRAFT_QUERY_MAP:
         if any(kw in topic_lower for kw in keywords):

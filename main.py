@@ -53,12 +53,13 @@ def run_pipeline() -> bool:
     try:
         # ── Step 1: Trend Discovery ────────────────────────────────────────────
         log.info("\n📌 STEP 1/5 — Trend Discovery")
-        topic = discover_topic()
+        topic_ref = discover_topic()          # ViralReference object
+        topic     = str(topic_ref)             # plain string for logging/SEO/video
         log.info(f"   Topic: {topic}")
 
         # ── Step 2: Script Generation ──────────────────────────────────────────
         log.info("\n✍️  STEP 2/5 — Script Generation")
-        script_result = generate_script(topic)
+        script_result = generate_script(topic_ref)  # pass full ref for transcript
         log.info(f"   Script: {script_result.word_count} words | "
                  f"~{script_result.estimated_duration_sec:.0f}s")
 
