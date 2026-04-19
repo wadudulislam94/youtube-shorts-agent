@@ -11,6 +11,8 @@ jobs:
   post-short:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # Opt into Node.js 24 now
 
     steps:
       # ── 1. Checkout code ────────────────────────────────────────────────────
@@ -44,18 +46,19 @@ jobs:
       # ── 6. Write .env from GitHub Secrets ────────────────────────────────────
       - name: Create .env file
         run: |
-          cat > .env << 'ENVEOF'
-          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
-          PIXABAY_API_KEY=${{ secrets.PIXABAY_API_KEY }}
-          YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}
-          CONTENT_NICHE=art
-          SHORTS_PER_RUN=1
-          SCHEDULE_INTERVAL_HOURS=6
-          WHISPER_MODEL=base
-          TTS_VOICE=random
-          YOUTUBE_CLIENT_SECRETS=credentials/client_secrets.json
-          YOUTUBE_TOKEN_FILE=credentials/youtube_token.json
-          ENVEOF
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
+          echo "PIXABAY_API_KEY=${{ secrets.PIXABAY_API_KEY }}" >> .env
+          echo "YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}" >> .env
+          echo "CONTENT_NICHE=art" >> .env
+          echo "SHORTS_PER_RUN=1" >> .env
+          echo "SCHEDULE_INTERVAL_HOURS=6" >> .env
+          echo "WHISPER_MODEL=base" >> .env
+          echo "TTS_VOICE=random" >> .env
+          echo "YOUTUBE_CLIENT_SECRETS=credentials/client_secrets.json" >> .env
+          echo "YOUTUBE_TOKEN_FILE=credentials/youtube_token.json" >> .env
+          echo "✅ .env created:"
+          cat .env | sed 's/=.*/=***/' 
+
 
       # ── 7. Restore YouTube credentials from Secrets ──────────────────────────
       - name: Restore YouTube credentials
