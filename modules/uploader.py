@@ -65,8 +65,9 @@ def _load_token(token_path: Path) -> Optional[Credentials]:
         if data.get("expiry"):
             try:
                 expiry = datetime.fromisoformat(data["expiry"])
-                if expiry.tzinfo is None:
-                    expiry = expiry.replace(tzinfo=timezone.utc)
+                # google-auth uses naive UTC datetimes — strip tzinfo if present
+                if expiry.tzinfo is not None:
+                    expiry = expiry.replace(tzinfo=None)
             except Exception:
                 pass
 
