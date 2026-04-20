@@ -60,13 +60,14 @@ VIDEO_FPS      = 30
 VIDEO_BITRATE  = "8000k"
 
 # ── Subtitle Styling ──────────────────────────────────────────────────────────
+SUBTITLE_FONT_NAME       = "Roboto"          # Installed via apt in GitHub Actions
 SUBTITLE_FONT_SIZE       = 88
 SUBTITLE_FONT_COLOR      = "white"
-SUBTITLE_HIGHLIGHT_COLOR = "#FFD700"    # Gold — active word
+SUBTITLE_HIGHLIGHT_COLOR = "#FFD700"         # Gold — active word
 SUBTITLE_STROKE_COLOR    = "black"
 SUBTITLE_STROKE_WIDTH    = 4
 SUBTITLE_WORDS_PER_LINE  = 3
-SUBTITLE_Y_POSITION      = 0.55        # 0=top, 1=bottom
+SUBTITLE_Y_POSITION      = 0.55             # 0=top, 1=bottom
 
 # ── Niche Configuration ───────────────────────────────────────────────────────
 NICHE_CONFIG = {

@@ -1,29 +1,22 @@
 """
-modules/video_builder.py (Free Edition — MoviePy 2.x compatible)
+modules/video_builder.py — High-Retention Edition
 ─────────────────────────────────────────────────────────────────────────────
-Step 4b: Video Assembly using MoviePy 2.x + PIL + Pixabay (free).
-
-Updated for MoviePy 2.x API:
-  - .subclipped() instead of .subclip()
-  - .resized() instead of .resize()
-  - .cropped() instead of .crop()
-  - .with_duration() instead of .set_duration()
-  - .with_audio() instead of .set_audio()
-  - .with_opacity() instead of .set_opacity()
-  - .image_transform() for per-frame subtitle rendering
-  - vfx.MultiplyColor / vfx.MultiplySpeed instead of colorx/speedx
+Produces scroll-stopping Shorts with:
+  1. Multi-clip dynamic background  (4 Pixabay clips, Ken Burns zoom)
+  2. Word-by-word ASS animated captions  (TikTok / Alex Hormozi style)
+  3. Background music overlay  (from assets/music/ folder)
+  4. Pure FFmpeg rendering  — no frame-by-frame Python loop
 """
 
 import math
 import os
 import random
+import subprocess
 import uuid
 from pathlib import Path
 from typing import List, Optional
 
-import numpy as np
 import requests
-from PIL import Image, ImageDraw, ImageFont
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 import config
@@ -32,226 +25,417 @@ from modules.subtitle_generator import SubtitleChunk
 
 log = get_logger("VideoBuilder")
 
-# ── Style Choices ──────────────────────────────────────────────────────────────
-ACCENT_COLORS = [
-    "#FFD700",  # Gold
-    "#FF6B6B",  # Coral
-    "#4ECDC4",  # Teal
-    "#FF8B94",  # Salmon Pink
-    "#FFE66D",  # Yellow
-    "#A8E6CF",  # Mint
-    "#C3A6FF",  # Lavender
-    "#FFA07A",  # Light Salmon
+# ── ASS colour constants (AABBGGRR) ───────────────────────────────────────────
+_ACCENT_PALETTE = [
+    "&H0000FFFF",   # Yellow    ← most viral
+    "&H0000FF7F",   # Green
+    "&H00FF7FFF",   # Pink
+    "&H007FFF00",   # Cyan-lime
 ]
 
 
-# ── Pixabay Video Download ─────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# 1. ASS SUBTITLE GENERATION
+# ══════════════════════════════════════════════════════════════════════════════
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-def _download_background_video(query: str) -> Path:
-    """Search Pixabay for a free background video and download it."""
-    if not config.PIXABAY_API_KEY:
-        raise RuntimeError(
-            "PIXABAY_API_KEY not set. Get free key at: https://pixabay.com/api/docs/"
-        )
-
-    log.info(f"🎬 Searching Pixabay for: '{query}'")
-
-    def _search(q: str):
-        resp = requests.get(
-            "https://pixabay.com/api/videos/",
-            params={
-                "key":        config.PIXABAY_API_KEY,
-                "q":          q,
-                "video_type": "film",
-                "per_page":   15,
-                "safesearch": "true",
-                "lang":       "en",
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
-        return resp.json().get("hits", [])
-
-    hits = _search(query)
-    if not hits:
-        log.warning(f"No Pixabay results for '{query}'. Trying fallback.")
-        hits = _search("nature landscape abstract")
-
-    if not hits:
-        raise RuntimeError("No Pixabay videos found.")
-
-    video   = random.choice(hits[:8])
-    videos  = video.get("videos", {})
-    vid_url = None
-    vid_info = None
-
-    for quality in ("large", "medium", "small", "tiny"):
-        if quality in videos and videos[quality].get("url"):
-            vid_url  = videos[quality]["url"]
-            vid_info = videos[quality]
-            break
-
-    if not vid_url:
-        raise RuntimeError("No downloadable URL in Pixabay response.")
-
-    log.info(f"⬇️  Downloading Pixabay video "
-             f"({vid_info.get('width','?')}×{vid_info.get('height','?')})...")
-
-    uid      = uuid.uuid4().hex[:8]
-    out_path = config.OUTPUT_VIDEO / f"bg_{uid}.mp4"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with requests.get(vid_url, stream=True, timeout=120) as r:
-        r.raise_for_status()
-        with open(out_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=65536):
-                if chunk:
-                    f.write(chunk)
-
-    size_mb = out_path.stat().st_size / (1024 * 1024)
-    log.info(f"✅ Background saved: {out_path.name} ({size_mb:.1f}MB)")
-    return out_path
+def _ass_ts(sec: float) -> str:
+    """Seconds → ASS timestamp H:MM:SS.cc"""
+    h  = int(sec // 3600)
+    m  = int((sec % 3600) // 60)
+    s  = sec % 60
+    return f"{h}:{m:02d}:{s:05.2f}"
 
 
-# ── Font Loading ───────────────────────────────────────────────────────────────
+def _generate_ass(chunks: List[SubtitleChunk], accent: str, out: Path) -> Path:
+    """
+    Generate .ass subtitle file with:
+    - All words in a chunk shown together
+    - Active word highlighted in accent colour + slightly larger
+    - Pop-in scale animation on first word of each chunk
+    """
+    font = getattr(config, "SUBTITLE_FONT_NAME", "Arial")
 
-def _load_font(size: int) -> ImageFont.FreeTypeFont:
-    candidates = [
-        config.ASSETS_FONTS / "Montserrat-ExtraBold.ttf",
-        config.ASSETS_FONTS / "BebasNeue-Regular.ttf",
-        config.ASSETS_FONTS / "Roboto-Bold.ttf",
-        Path("C:/Windows/Fonts/arialbd.ttf"),
-        Path("C:/Windows/Fonts/impact.ttf"),
-        Path("C:/Windows/Fonts/verdanab.ttf"),
-    ]
-    for path in candidates:
-        if path.exists():
-            try:
-                return ImageFont.truetype(str(path), size)
-            except Exception:
+    header = f"""[Script Info]
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+PlayResX: 1080
+PlayResY: 1920
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Active,{font},88,{accent},&H000000FF,&H00000000,&H96000000,-1,0,0,0,100,100,2,0,1,6,3,2,60,60,230,1
+Style: Normal,{font},88,&H00FFFFFF,&H000000FF,&H00000000,&H96000000,-1,0,0,0,100,100,2,0,1,5,2,2,60,60,230,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    events = []
+
+    for chunk in chunks:
+        if not chunk.words:
+            continue
+
+        words = chunk.words
+
+        for active_idx, active_word in enumerate(words):
+            # Build full line with colour overrides per word
+            parts = []
+            for i, w in enumerate(words):
+                txt = w.word.strip().upper()
+                if not txt:
+                    continue
+                if i == active_idx:
+                    parts.append(
+                        r"{\c" + accent + r"\fscx112\fscy112}" + txt + r"{\r}"
+                    )
+                else:
+                    parts.append(
+                        r"{\c&H00FFFFFF&\fscx100\fscy100}" + txt + r"{\r}"
+                    )
+
+            if not parts:
                 continue
 
-    log.warning("⚠️  No TTF font found — using PIL default.")
-    try:
-        return ImageFont.load_default(size=size)
-    except TypeError:
-        return ImageFont.load_default()
+            line = "  ".join(parts)
+            ts   = _ass_ts(active_word.start)
+            te   = _ass_ts(active_word.end + 0.04)
+
+            if active_idx == 0:
+                # Pop-in: scale from 0→112→100 over 150ms
+                pfx = (
+                    r"{\fscx0\fscy0"
+                    r"\t(0,100,\fscx112\fscy112)"
+                    r"\t(100,150,\fscx100\fscy100)}"
+                )
+                events.append(
+                    f"Dialogue: 0,{ts},{te},Normal,,0,0,0,,{pfx}{line}"
+                )
+            else:
+                events.append(
+                    f"Dialogue: 0,{ts},{te},Normal,,0,0,0,,{line}"
+                )
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(header + "\n".join(events), encoding="utf-8")
+    log.info(f"📝 ASS subtitles: {len(events)} events → {out.name}")
+    return out
 
 
-# ── Subtitle Rendering ─────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# 2. MULTI-CLIP PIXABAY DOWNLOAD
+# ══════════════════════════════════════════════════════════════════════════════
 
-def _render_subtitle_on_frame(
-    frame_array: np.ndarray,
-    chunk: SubtitleChunk,
-    accent_color: str,
-) -> np.ndarray:
-    """Overlay karaoke-style subtitles on a frame (numpy array → numpy array)."""
-    img  = Image.fromarray(frame_array)
-    draw = ImageDraw.Draw(img)
-    W, H = img.size
-
-    fs         = config.SUBTITLE_FONT_SIZE
-    base_font  = _load_font(fs)
-    big_font   = _load_font(int(fs * 1.12))
-
-    word_texts = [w.word for w in chunk.words]
-    y_center   = int(H * config.SUBTITLE_Y_POSITION)
-    gap        = 18
-    sw         = config.SUBTITLE_STROKE_WIDTH
-
-    # Measure widths
-    word_widths = []
-    for i, wt in enumerate(word_texts):
-        font = big_font if i == chunk.active_idx else base_font
-        bbox = draw.textbbox((0, 0), wt, font=font)
-        word_widths.append(bbox[2] - bbox[0])
-
-    total_w = sum(word_widths) + gap * max(0, len(word_widths) - 1)
-    x       = (W - total_w) // 2
-
-    for i, (wt, ww) in enumerate(zip(word_texts, word_widths)):
-        is_active = (i == chunk.active_idx)
-        color     = accent_color if is_active else config.SUBTITLE_FONT_COLOR
-        font      = big_font     if is_active else base_font
-
-        # Stroke outline
-        for dx, dy in [(-sw, 0), (sw, 0), (0, -sw), (0, sw),
-                       (-sw, -sw), (sw, -sw), (-sw, sw), (sw, sw)]:
-            draw.text((x + dx, y_center + dy), wt, font=font,
-                      fill=config.SUBTITLE_STROKE_COLOR)
-
-        draw.text((x, y_center), wt, font=font, fill=color)
-        x += ww + gap
-
-    return np.array(img)
-
-
-def _find_chunk_at(chunks: List[SubtitleChunk], t: float) -> Optional[SubtitleChunk]:
-    for chunk in chunks:
-        if chunk.start <= t <= chunk.end:
-            return chunk
-    return None
-
-
-# ── Dynamic Craft Pixabay Query ────────────────────────────────────────────────
-
-# Map craft keywords → best Pixabay search term for authentic footage
 _CRAFT_QUERY_MAP = [
-    (["resin", "epoxy", "pour"],          "resin art pour satisfying"),
-    (["pottery", "ceramic", "wheel", "clay", "glaze"], "pottery wheel clay throwing"),
-    (["watercolor", "water color"],        "watercolor painting process"),
-    (["acrylic", "canvas", "paint"],       "acrylic painting art process"),
-    (["oil paint", "oil painting"],        "oil painting artist brush"),
-    (["wood", "carv", "lathe", "chisel",
-       "walnut", "maple", "lumber"],       "woodworking crafting process"),
-    (["knit", "crochet", "yarn", "wool"], "knitting crochet handmade"),
-    (["macrame", "weav", "fiber"],         "macrame weaving handmade"),
-    (["jewelry", "bead", "wire"],          "jewelry making craft"),
-    (["candle", "wax", "wick"],            "candle making craft"),
-    (["soap", "lather", "swirl"],          "soap making craft satisfying"),
-    (["sketch", "pencil", "draw"],         "drawing sketching pencil art"),
-    (["origami", "paper fold", "paper"],   "origami paper folding"),
-    (["sculpt", "figurine", "statue"],     "sculpting clay art"),
-    (["glass", "stained", "mosaic"],       "glass art mosaic craft"),
-    (["embroider", "stitch", "thread",
-       "sew", "quilt", "fabric"],          "embroidery sewing handmade craft"),
-    (["linocut", "block print", "stamp"],  "printmaking block print art"),
-    (["leather"],                          "leather craft handmade"),
-    (["satisfying", "oddly"],              "satisfying art craft timelapse"),
+    (["resin", "epoxy"],            ["resin art pour satisfying",   "epoxy resin craft"]),
+    (["pottery", "clay", "wheel"],  ["pottery wheel throwing",       "clay ceramics craft"]),
+    (["watercolor"],                ["watercolor painting process",  "watercolor art timelapse"]),
+    (["acrylic", "canvas"],         ["acrylic painting art",         "canvas painting process"]),
+    (["wood", "carv"],              ["woodworking satisfying craft",  "wood carving art"]),
+    (["knit", "crochet", "yarn"],   ["knitting crochet handmade",    "yarn craft making"]),
+    (["candle", "wax"],             ["candle making craft",          "wax art satisfying"]),
+    (["jewelry", "bead"],           ["jewelry making handmade",      "craft jewelry art"]),
+    (["sculpt", "clay figure"],     ["clay sculpture art",           "sculpting craft"]),
+    (["sketch", "draw", "pencil"],  ["drawing sketching art",        "pencil art timelapse"]),
 ]
 
 _ART_FALLBACKS = [
-    "satisfying art craft painting",
-    "art creation process timelapse",
-    "handmade craft satisfying",
-    "artist painting creating",
-    "diy craft making process",
+    "satisfying art craft timelapse",
+    "handmade craft making process",
+    "art creation process",
+    "painting artist studio",
 ]
 
 
-def _craft_video_query(topic: str, niche_cfg: dict) -> str:
+def _topic_queries(topic: str) -> List[str]:
+    t = topic.lower()
+    for keys, queries in _CRAFT_QUERY_MAP:
+        if any(k in t for k in keys):
+            return queries + [random.choice(_ART_FALLBACKS)]
+    return _ART_FALLBACKS[:3]
+
+
+def _pixabay_hits(query: str) -> list:
+    try:
+        r = requests.get(
+            "https://pixabay.com/api/videos/",
+            params={
+                "key": config.PIXABAY_API_KEY,
+                "q": query, "video_type": "film",
+                "per_page": 12, "safesearch": "true", "lang": "en",
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json().get("hits", [])
+    except Exception as e:
+        log.warning(f"Pixabay search '{query}': {e}")
+        return []
+
+
+def _dl_clip(hit: dict, idx: int) -> Optional[Path]:
+    vids = hit.get("videos", {})
+    url  = None
+    for q in ("large", "medium", "small", "tiny"):
+        if q in vids and vids[q].get("url"):
+            url = vids[q]["url"]
+            break
+    if not url:
+        return None
+
+    uid  = uuid.uuid4().hex[:6]
+    dest = config.OUTPUT_VIDEO / f"clip_{idx}_{uid}.mp4"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with requests.get(url, stream=True, timeout=90) as r:
+            r.raise_for_status()
+            with open(dest, "wb") as f:
+                for ch in r.iter_content(65536):
+                    if ch:
+                        f.write(ch)
+        return dest
+    except Exception as e:
+        log.warning(f"Clip {idx} download failed: {e}")
+        return None
+
+
+def _download_clips(topic: str, n: int = 4) -> List[Path]:
+    queries  = _topic_queries(topic)
+    clips    = []
+    seen_ids: set = set()
+
+    for query in queries * 2:
+        if len(clips) >= n:
+            break
+        for hit in _pixabay_hits(query):
+            if hit.get("id") in seen_ids:
+                continue
+            seen_ids.add(hit.get("id"))
+            p = _dl_clip(hit, len(clips))
+            if p:
+                clips.append(p)
+                log.info(f"  📥 Clip {len(clips)}/{n}: {p.name}")
+                break
+
+    if not clips:
+        log.warning("No clips downloaded — trying generic fallback")
+        for hit in _pixabay_hits("satisfying art process"):
+            p = _dl_clip(hit, 0)
+            if p:
+                clips.append(p)
+                break
+
+    return clips
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 3. FFMPEG HELPERS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _run(args: List[str], tag: str = "") -> bool:
+    """Run FFmpeg. Returns True on success."""
+    cmd = ["ffmpeg", "-y"] + args
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=300)
+        if r.returncode != 0:
+            err = r.stderr.decode("utf-8", errors="replace")[-600:]
+            log.warning(f"FFmpeg [{tag}] rc={r.returncode}\n{err}")
+            return False
+        return True
+    except Exception as e:
+        log.error(f"FFmpeg [{tag}] exception: {e}")
+        return False
+
+
+def _normalize_clip(src: Path, dst: Path, dur: float) -> bool:
+    """Scale → crop → Ken Burns zoom → fixed 1080×1920 @ 30fps."""
+    W, H = 1080, 1920
+    z0   = random.uniform(1.00, 1.04)
+    z1   = random.uniform(1.05, 1.10)
+    fps  = 30
+    # Ken Burns: slowly zoom in across the clip duration
+    n_frames = int(dur * fps)
+    vf = (
+        f"scale={W}:{H}:force_original_aspect_ratio=increase,"
+        f"crop={W}:{H},"
+        f"zoompan=z='if(lte(on,1),{z0:.3f},min(zoom+{(z1-z0)/n_frames:.5f},{z1:.3f}))':"
+        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s={W}x{H}:fps={fps},"
+        f"setpts=PTS-STARTPTS"
+    )
+    return _run([
+        "-i", str(src),
+        "-t", str(dur + 0.5),
+        "-vf", vf,
+        "-r", str(fps),
+        "-an",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+        str(dst),
+    ], "normalize")
+
+
+def _assemble_background(clips: List[Path], total_dur: float) -> Path:
     """
-    Build a targeted Pixabay query from the craft topic.
-    Falls back to niche config query if no keywords match.
+    Concatenate clips with FFmpeg xfade transitions → single 1080×1920 video.
     """
-    topic_lower = str(topic).lower()
+    uid = uuid.uuid4().hex[:8]
+    out = config.OUTPUT_VIDEO / f"bg_{uid}.mp4"
 
-    for keywords, query in _CRAFT_QUERY_MAP:
-        if any(kw in topic_lower for kw in keywords):
-            log.info(f"🎯 Craft query matched: '{query}'")
-            return query
+    n         = len(clips)
+    clip_dur  = total_dur / n
+    fade_dur  = 0.35
+    fps       = 30
 
-    # Use niche default or a random art fallback
-    default = niche_cfg.get("bg_video_query", "")
-    if default and default != "satisfying art painting process":
-        return default
+    # Normalize each clip
+    normed = []
+    for i, clip in enumerate(clips):
+        dst = config.OUTPUT_VIDEO / f"n{i}_{uid}.mp4"
+        if _normalize_clip(clip, dst, clip_dur + fade_dur + 0.5):
+            normed.append(dst)
+        else:
+            log.warning(f"Normalise failed for clip {i}")
 
-    fallback = random.choice(_ART_FALLBACKS)
-    log.info(f"🎨 Using art fallback query: '{fallback}'")
-    return fallback
+    if not normed:
+        raise RuntimeError("All clip normalisations failed")
+
+    if len(normed) == 1:
+        # Single clip — just loop it
+        _run([
+            "-stream_loop", "-1",
+            "-i", str(normed[0]),
+            "-t", str(total_dur),
+            "-c", "copy", str(out),
+        ], "loop_single")
+        _cleanup(normed)
+        return out
+
+    # Build xfade filter chain: [0][1]xfade=offset=T[x1]; [x1][2]xfade=offset=T2[x2]...
+    inputs = []
+    for n_path in normed:
+        inputs += ["-i", str(n_path)]
+
+    n        = len(normed)
+    fc_parts = []
+    last_tag = "[0:v]"
+
+    for i in range(1, n):
+        offset   = clip_dur * i - fade_dur * i
+        out_tag  = f"[xf{i}]" if i < n - 1 else "[outv]"
+        fc_parts.append(
+            f"{last_tag}[{i}:v]xfade=transition=fade:"
+            f"duration={fade_dur:.2f}:offset={offset:.2f}{out_tag}"
+        )
+        last_tag = out_tag
+
+    fc = ";".join(fc_parts)
+
+    success = _run(
+        inputs
+        + ["-filter_complex", fc, "-map", "[outv]",
+           "-t", str(total_dur),
+           "-r", str(fps),
+           "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+           "-an", str(out)],
+        "xfade_assemble",
+    )
+
+    _cleanup(normed)
+
+    if not success or not out.exists():
+        # fallback: just use the first normalised clip looped
+        log.warning("xfade failed — falling back to single looped clip")
+        n0 = config.OUTPUT_VIDEO / f"n0_{uid}_fb.mp4"
+        _normalize_clip(clips[0], n0, total_dur)
+        _run(["-stream_loop", "-1", "-i", str(n0),
+              "-t", str(total_dur), "-c", "copy", str(out)], "fallback_loop")
+        try:
+            os.remove(n0)
+        except Exception:
+            pass
+
+    return out
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 4. BACKGROUND MUSIC
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _find_music() -> Optional[Path]:
+    """Return a random music file from assets/music/ if any exist."""
+    music_dir = config.BASE_DIR / "assets" / "music"
+    if not music_dir.exists():
+        return None
+    tracks = list(music_dir.glob("*.mp3")) + list(music_dir.glob("*.m4a"))
+    return random.choice(tracks) if tracks else None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 5. FINAL RENDER
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _final_render(
+    bg: Path,
+    ass: Path,
+    audio: Path,
+    music: Optional[Path],
+    duration: float,
+    out: Path,
+) -> bool:
+    """
+    Burn ASS subtitles, mux voiceover, optionally mix background music.
+    Pure FFmpeg — fast, no Python frame loop.
+    """
+    # Escape path for FFmpeg ass filter (Windows backslash fix)
+    ass_escaped = str(ass).replace("\\", "/").replace(":", "\\:")
+
+    if music:
+        # Mix voiceover + music (-25 dB music)
+        af = (
+            f"[1:a]volume=0.10,aloop=loop=-1:size=2e+09[m];"
+            f"[0:a][m]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+        )
+        cmd = [
+            "-i", str(audio),
+            "-i", str(music),
+            "-i", str(bg),
+            "-t", str(duration),
+            "-filter_complex", af,
+            "-vf", f"ass='{ass_escaped}'",
+            "-map", "2:v", "-map", "[aout]",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            "-b:v", "4M",
+            "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart",
+            str(out),
+        ]
+    else:
+        cmd = [
+            "-i", str(bg),
+            "-i", str(audio),
+            "-t", str(duration),
+            "-vf", f"ass='{ass_escaped}'",
+            "-map", "0:v", "-map", "1:a",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            "-b:v", "4M",
+            "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart",
+            str(out),
+        ]
+
+    return _run(cmd, "final_render")
+
+
+def _cleanup(paths):
+    for p in paths:
+        try:
+            if p and Path(p).exists():
+                os.remove(p)
+        except Exception:
+            pass
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 6. PUBLIC INTERFACE
+# ══════════════════════════════════════════════════════════════════════════════
 
 def build_video(
     audio_path: Path,
@@ -259,134 +443,60 @@ def build_video(
     audio_duration: float,
     topic: str,
 ) -> Path:
-    """Render final YouTube Short MP4 — MoviePy 2.x compatible."""
+    """
+    Render a high-retention YouTube Short.
 
-    # MoviePy 2.x imports
-    from moviepy import (
-        VideoFileClip, AudioFileClip, CompositeVideoClip,
-        ImageClip, concatenate_videoclips,
-    )
-    import moviepy.video.fx as vfx
+    Pipeline:
+      1. Download 4 Pixabay clips with Ken Burns zoom
+      2. Assemble with xfade crossfades
+      3. Generate ASS word-by-word animated subtitles
+      4. Final FFmpeg render: subtitles + audio + optional music
+    """
+    uid        = uuid.uuid4().hex[:8]
+    out_path   = config.OUTPUT_FINAL / f"short_{uid}.mp4"
+    ass_path   = config.OUTPUT_FINAL / f"subs_{uid}.ass"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    uid          = uuid.uuid4().hex[:8]
-    output_path  = config.OUTPUT_FINAL / f"short_{uid}.mp4"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    accent = random.choice(_ACCENT_PALETTE)
+    log.info(f"🎬 High-Retention Builder | accent={accent} | uid={uid}")
 
-    accent_color = random.choice(ACCENT_COLORS)
-    niche_cfg    = config.get_niche()
+    # Real audio duration (authoritative)
+    duration = float(audio_duration)
 
-    # ── Dynamic Pixabay query based on craft topic ──────────────────────────────
-    bg_query = _craft_video_query(topic, niche_cfg)
+    # ── Step A: Download multi-clip background ─────────────────────────────
+    log.info("📥 Downloading Pixabay clips...")
+    raw_clips = _download_clips(str(topic), n=4)
 
-    log.info(f"🎬 Building video | accent={accent_color} | uid={uid}")
+    # ── Step B: Assemble & normalise background ────────────────────────────
+    log.info("🎞  Assembling multi-clip background...")
+    bg_path = _assemble_background(raw_clips, duration)
 
-    # 1. Download background
-    bg_path = _download_background_video(bg_query)
+    # ── Step C: Generate ASS subtitles ─────────────────────────────────────
+    log.info("🔤 Generating ASS animated subtitles...")
+    _generate_ass(subtitle_chunks, accent, ass_path)
 
-    # 2. Load audio FIRST to get the real duration (the passed-in value may be estimated)
-    audio_clip    = AudioFileClip(str(audio_path))
-    real_duration = audio_clip.duration - 0.1   # 0.1s safety trim prevents end-of-file reads
-    log.info(f"🔊 Audio duration: {audio_clip.duration:.2f}s → using {real_duration:.2f}s")
+    # ── Step D: Find background music (optional) ───────────────────────────
+    music = _find_music()
+    if music:
+        log.info(f"🎵 Background music: {music.name}")
+    else:
+        log.info("🔇 No music tracks in assets/music/ — skipping BGM")
 
-    # 3. Load background (no audio)
-    bg_clip = VideoFileClip(str(bg_path), audio=False)
+    # ── Step E: Final render ───────────────────────────────────────────────
+    log.info(f"🎬 Final FFmpeg render → {out_path.name}")
+    success = _final_render(bg_path, ass_path, audio_path, music, duration, out_path)
 
-    # 4. Slight speed variation for uniqueness
-    speed = random.uniform(0.95, 1.05)
-    bg_clip = bg_clip.with_effects([vfx.MultiplySpeed(speed)])
-
-    # 5. Loop if shorter than audio
-    if bg_clip.duration < real_duration:
-        loops   = math.ceil(real_duration / bg_clip.duration)
-        bg_clip = concatenate_videoclips([bg_clip] * loops)
-
-    bg_clip = bg_clip.subclipped(0, real_duration)
-
-    # 6. Resize and crop to 1080×1920 (9:16)
-    tw, th = config.VIDEO_WIDTH, config.VIDEO_HEIGHT
-    cw, ch = bg_clip.size
-    scale  = max(tw / cw, th / ch)
-    new_w  = int(cw * scale)
-    new_h  = int(ch * scale)
-    bg_clip = bg_clip.resized((new_w, new_h))
-
-    # Random crop offset for uniqueness
-    max_x = max(0, new_w - tw)
-    max_y = max(0, new_h - th)
-    ox    = random.randint(0, max_x)
-    oy    = random.randint(0, max_y)
-    bg_clip = bg_clip.cropped(x1=ox, y1=oy, x2=ox + tw, y2=oy + th)
-
-    # 7. Random color tint for uniqueness
-    tint = random.uniform(0.85, 1.0)
-    bg_clip = bg_clip.with_effects([vfx.MultiplyColor(tint)])
-
-    # 8. Apply karaoke subtitles via transform()
-    log.info("🔤 Applying karaoke subtitles...")
-
-    def apply_subtitles(get_frame, t):
-        frame = get_frame(t)
-        chunk = _find_chunk_at(subtitle_chunks, t)
-        if chunk is not None:
-            frame = _render_subtitle_on_frame(frame, chunk, accent_color)
-        return frame
-
-    video_with_subs = bg_clip.transform(apply_subtitles)
-
-    # 9. Gradient overlay (dark band behind subtitle zone)
-    gradient_arr  = _make_gradient_overlay(tw, th)
-    gradient_clip = (
-        ImageClip(gradient_arr)
-        .with_duration(real_duration)
-        .with_opacity(0.55)
-    )
-
-    # 10. Composite
-    final_clip = CompositeVideoClip([video_with_subs, gradient_clip])
-
-    # 11. Attach audio — trim audio to match real_duration to be safe
-    audio_clip = audio_clip.subclipped(0, real_duration)
-    final_clip = final_clip.with_audio(audio_clip).with_duration(real_duration)
-
-    # 11. Export
-    log.info(f"🎞️  Exporting {tw}×{th} @ {config.VIDEO_FPS}fps → {output_path.name}")
-    final_clip.write_videofile(
-        str(output_path),
-        fps=config.VIDEO_FPS,
-        codec="libx264",
-        audio_codec="aac",
-        bitrate=config.VIDEO_BITRATE,
-        preset="fast",
-        threads=4,
-        logger=None,
-    )
-
-    # Cleanup
-    for clip in [bg_clip, audio_clip, final_clip]:
-        try:
-            clip.close()
-        except Exception:
-            pass
+    # Cleanup temp files
+    _cleanup(raw_clips)
+    _cleanup([bg_path])
     try:
-        os.remove(bg_path)
+        ass_path.unlink()
     except Exception:
         pass
 
-    size_mb = output_path.stat().st_size / (1024 * 1024)
-    log.info(f"✅ Video complete: {output_path.name} ({size_mb:.1f}MB)")
-    return output_path
+    if not success or not out_path.exists():
+        raise RuntimeError("Final FFmpeg render failed — check logs above")
 
-
-def _make_gradient_overlay(width: int, height: int) -> np.ndarray:
-    """Dark gradient band around subtitle zone for readability."""
-    overlay = np.zeros((height, width, 3), dtype=np.uint8)
-    sub_y   = int(height * config.SUBTITLE_Y_POSITION)
-    band    = 200
-
-    for y in range(max(0, sub_y - band), min(height, sub_y + band)):
-        dist  = abs(y - sub_y)
-        alpha = max(0.0, 1.0 - dist / band)
-        val   = int(alpha * 35)
-        overlay[y, :] = val
-
-    return overlay
+    size_mb = out_path.stat().st_size / (1024 * 1024)
+    log.info(f"✅ Video complete: {out_path.name} ({size_mb:.1f}MB)")
+    return out_path

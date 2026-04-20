@@ -27,10 +27,12 @@ jobs:
           cache: 'pip'
 
       # ── 3. Install system deps (ffmpeg for MoviePy) ─────────────────────────
-      - name: Install ffmpeg
+      - name: Install ffmpeg + fonts + libass
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg fonts-roboto libass-dev
+          echo "✅ FFmpeg: $(ffmpeg -version 2>&1 | head -1)"
+          echo "✅ Roboto font: $(fc-list | grep -i roboto | head -3)"
 
       # ── 4. Install Python dependencies ──────────────────────────────────────
       - name: Install Python packages
@@ -66,6 +68,29 @@ jobs:
           mkdir -p credentials
           echo '${{ secrets.YOUTUBE_CLIENT_SECRETS_JSON }}' > credentials/client_secrets.json
           echo '${{ secrets.YOUTUBE_TOKEN_JSON }}' > credentials/youtube_token.json
+
+      # ── 7b. Download royalty-free background music (cached) ──────────────────
+      - name: Cache background music
+        uses: actions/cache@v4
+        with:
+          path: assets/music
+          key: bgm-tracks-v2
+
+      - name: Download background music tracks
+        run: |
+          mkdir -p assets/music
+          # Only download if not already cached
+          if [ ! -f assets/music/lofi1.mp3 ]; then
+            echo "Downloading royalty-free BGM tracks..."
+            curl -L -o assets/music/lofi1.mp3 "https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0c6ff1bbb.mp3" 2>/dev/null || true
+            curl -L -o assets/music/lofi2.mp3 "https://cdn.pixabay.com/download/audio/2022/08/02/audio_884fe92c21.mp3" 2>/dev/null || true
+            curl -L -o assets/music/ambient1.mp3 "https://cdn.pixabay.com/download/audio/2022/03/10/audio_c8c8a73467.mp3" 2>/dev/null || true
+            # Remove any empty files
+            find assets/music -size 0 -delete 2>/dev/null || true
+            echo "BGM files: $(ls assets/music/ 2>/dev/null)"
+          else
+            echo "BGM tracks already cached."
+          fi
 
       # ── 8. Run the pipeline ──────────────────────────────────────────────────
       - name: Run YouTube Shorts pipeline
