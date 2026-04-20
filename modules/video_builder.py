@@ -381,47 +381,70 @@ def _final_render(
     out: Path,
 ) -> bool:
     """
-    Burn ASS subtitles, mux voiceover, optionally mix background music.
-    Pure FFmpeg — fast, no Python frame loop.
+    2-step FFmpeg render:
+      Step 1 — Burn ASS subtitles into video (no audio)
+      Step 2 — Mux voiceover + optional background music
+    Avoids the -vf / -filter_complex conflict.
     """
-    # Escape path for FFmpeg ass filter (Windows backslash fix)
-    ass_escaped = str(ass).replace("\\", "/").replace(":", "\\:")
+    uid = uuid.uuid4().hex[:6]
 
-    if music:
-        # Mix voiceover + music (-25 dB music)
-        af = (
-            f"[1:a]volume=0.10,aloop=loop=-1:size=2e+09[m];"
-            f"[0:a][m]amix=inputs=2:duration=first:dropout_transition=2[aout]"
-        )
-        cmd = [
-            "-i", str(audio),
-            "-i", str(music),
-            "-i", str(bg),
-            "-t", str(duration),
-            "-filter_complex", af,
-            "-vf", f"ass='{ass_escaped}'",
-            "-map", "2:v", "-map", "[aout]",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-            "-b:v", "4M",
-            "-c:a", "aac", "-b:a", "192k",
+    # Escape ASS path for FFmpeg subtitles filter
+    ass_str = str(ass).replace("\\", "/")
+    if ":" in ass_str:
+        # Windows drive letter — escape the colon
+        parts = ass_str.split(":", 1)
+        ass_str = parts[0] + "\\:" + parts[1]
+
+    # ── Step 1: Burn subtitles ──────────────────────────────────────────────
+    subbed = out.parent / f"subbed_{uid}.mp4"
+    ok = _run([
+        "-i", str(bg),
+        "-t", str(duration),
+        "-vf", f"ass='{ass_str}'",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-b:v", "4M",
+        "-an",
+        str(subbed),
+    ], "burn_subs")
+
+    if not ok or not subbed.exists():
+        log.warning("Subtitle burn failed — trying without subtitles")
+        # Fallback: just copy bg as subbed
+        _run(["-i", str(bg), "-t", str(duration), "-c", "copy", str(subbed)], "fallback_copy")
+
+    # ── Step 2: Mux voiceover + optional music ──────────────────────────────
+    if music and music.exists() and music.stat().st_size > 10000:
+        # -stream_loop -1 loops the music infinitely; -t cuts it at duration
+        mux_cmd = [
+            "-i",           str(subbed),          # 0: video (no audio)
+            "-i",           str(audio),            # 1: voiceover
+            "-stream_loop", "-1",
+            "-i",           str(music),            # 2: background music (looped)
+            "-t",           str(duration),
+            "-filter_complex",
+            "[2:a]volume=0.10[m];[1:a][m]amix=inputs=2:duration=first:dropout_transition=2[aout]",
+            "-map",  "0:v",
+            "-map",  "[aout]",
+            "-c:v",  "copy",
+            "-c:a",  "aac", "-b:a", "192k",
             "-movflags", "+faststart",
             str(out),
         ]
     else:
-        cmd = [
-            "-i", str(bg),
-            "-i", str(audio),
-            "-t", str(duration),
-            "-vf", f"ass='{ass_escaped}'",
+        # No music — simple mux
+        mux_cmd = [
+            "-i",  str(subbed),
+            "-i",  str(audio),
+            "-t",  str(duration),
             "-map", "0:v", "-map", "1:a",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-            "-b:v", "4M",
+            "-c:v", "copy",
             "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart",
             str(out),
         ]
 
-    return _run(cmd, "final_render")
+    success = _run(mux_cmd, "mux_audio")
+    _cleanup([subbed])
+    return success
 
 
 def _cleanup(paths):
