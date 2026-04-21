@@ -83,6 +83,7 @@ def run_pipeline() -> bool:
             subtitle_chunks=subtitle_chunks,
             audio_duration=audio_duration,
             topic=topic,
+            script=script_result.full_script,
         )
         log.info(f"   Video: {video_path.name}")
 

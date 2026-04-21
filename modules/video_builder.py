@@ -126,19 +126,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 # 2. MULTI-CLIP PIXABAY DOWNLOAD
 # ══════════════════════════════════════════════════════════════════════════════
 
-_CRAFT_QUERY_MAP = [
-    (["resin", "epoxy"],            ["resin art pour satisfying",   "epoxy resin craft"]),
-    (["pottery", "clay", "wheel"],  ["pottery wheel throwing",       "clay ceramics craft"]),
-    (["watercolor"],                ["watercolor painting process",  "watercolor art timelapse"]),
-    (["acrylic", "canvas"],         ["acrylic painting art",         "canvas painting process"]),
-    (["wood", "carv"],              ["woodworking satisfying craft",  "wood carving art"]),
-    (["knit", "crochet", "yarn"],   ["knitting crochet handmade",    "yarn craft making"]),
-    (["candle", "wax"],             ["candle making craft",          "wax art satisfying"]),
-    (["jewelry", "bead"],           ["jewelry making handmade",      "craft jewelry art"]),
-    (["sculpt", "clay figure"],     ["clay sculpture art",           "sculpting craft"]),
-    (["sketch", "draw", "pencil"],  ["drawing sketching art",        "pencil art timelapse"]),
-]
-
 _ART_FALLBACKS = [
     "satisfying art craft timelapse",
     "handmade craft making process",
@@ -146,13 +133,58 @@ _ART_FALLBACKS = [
     "painting artist studio",
 ]
 
+_KEYWORD_QUERY_MAP = [
+    (["resin", "epoxy pour", "resin art"],                   "resin art pour satisfying"),
+    (["pottery", "clay wheel", "ceramic", "throwing"],        "pottery wheel clay throwing"),
+    (["watercolor", "water colour"],                         "watercolor painting art"),
+    (["acrylic", "canvas paint"],                            "acrylic painting canvas art"),
+    (["oil paint"],                                          "oil painting artist brush"),
+    (["wood", "carv", "chisel", "lathe", "walnut", "lumber"], "woodworking crafting process"),
+    (["metal", "cast", "molten", "forge", "weld", "pour"],    "molten metal casting process"),
+    (["sand cast"],                                          "sand casting metalwork foundry"),
+    (["knit", "crochet", "yarn"],                            "knitting crochet handmade"),
+    (["macrame", "weav", "fiber"],                           "macrame weaving fiber art"),
+    (["jewelry", "ring", "necklace", "bead"],                "jewelry making handmade craft"),
+    (["candle", "wax", "wick"],                              "candle making wax craft"),
+    (["soap"],                                               "soap making craft satisfying"),
+    (["glass", "stained glass", "mosaic"],                   "stained glass mosaic art"),
+    (["sketch", "pencil", "draw", "illustrat"],              "drawing sketching pencil art"),
+    (["origami", "paper fold"],                              "origami paper folding art"),
+    (["sculpt", "figurine", "statue"],                       "clay sculpture sculpting art"),
+    (["leather"],                                            "leather craft handmade"),
+    (["embroid", "stitch", "sewing", "quilt"],               "embroidery sewing handmade"),
+    (["print", "stamp", "linocut", "block print"],           "printmaking block print art"),
+    (["calligraph", "brush letter"],                         "calligraphy brush art"),
+    (["glaze", "kiln", "firing"],                            "ceramic glazing kiln pottery"),
+    (["epoxy table", "river table", "geode"],                "epoxy resin river table"),
+    (["mosaic", "tile art"],                                 "mosaic tile art craft"),
+    (["silk", "fabric dye", "tie dye"],                      "fabric dyeing tie dye art"),
+    (["knife", "blade", "blacksmith"],                       "blacksmith knife making forge"),
+    (["satisfying", "oddly", "mesmeriz", "timelapse"],       "satisfying craft timelapse"),
+    (["paint", "brush", "color"],                            "painting art brush process"),
+]
 
-def _topic_queries(topic: str) -> List[str]:
-    t = topic.lower()
-    for keys, queries in _CRAFT_QUERY_MAP:
-        if any(k in t for k in keys):
-            return queries + [random.choice(_ART_FALLBACKS)]
-    return _ART_FALLBACKS[:3]
+
+def _topic_queries(topic: str, script: str = "") -> List[str]:
+    """Extract Pixabay search queries by scanning topic + script for visual keywords."""
+    # Scan both the topic title AND the first 400 chars of the script
+    combined = (topic + " " + script[:400]).lower()
+
+    matched = []
+    for keywords, query in _KEYWORD_QUERY_MAP:
+        if any(kw in combined for kw in keywords):
+            if query not in matched:
+                matched.append(query)
+            if len(matched) >= 3:
+                break
+
+    if not matched:
+        matched = [random.choice(_ART_FALLBACKS)]
+
+    # Add a variety fallback as a 4th option
+    matched.append(random.choice(_ART_FALLBACKS))
+    log.info(f"🎯 Pixabay queries from script: {matched[:3]}")
+    return matched[:4]
 
 
 def _pixabay_hits(query: str) -> list:
@@ -199,8 +231,8 @@ def _dl_clip(hit: dict, idx: int) -> Optional[Path]:
         return None
 
 
-def _download_clips(topic: str, n: int = 4) -> List[Path]:
-    queries  = _topic_queries(topic)
+def _download_clips(topic: str, n: int = 4, script: str = "") -> List[Path]:
+    queries  = _topic_queries(topic, script)
     clips    = []
     seen_ids: set = set()
 
@@ -465,13 +497,14 @@ def build_video(
     subtitle_chunks: List[SubtitleChunk],
     audio_duration: float,
     topic: str,
+    script: str = "",
 ) -> Path:
     """
     Render a high-retention YouTube Short.
 
     Pipeline:
-      1. Download 4 Pixabay clips with Ken Burns zoom
-      2. Assemble with xfade crossfades
+      1. Download 4 Pixabay clips matched to topic + script keywords
+      2. Assemble with xfade crossfades + Ken Burns zoom
       3. Generate ASS word-by-word animated subtitles
       4. Final FFmpeg render: subtitles + audio + optional music
     """
@@ -482,13 +515,14 @@ def build_video(
 
     accent = random.choice(_ACCENT_PALETTE)
     log.info(f"🎬 High-Retention Builder | accent={accent} | uid={uid}")
+    log.info(f"   Script keywords: {script[:80]}..." if script else "   No script provided")
 
     # Real audio duration (authoritative)
     duration = float(audio_duration)
 
     # ── Step A: Download multi-clip background ─────────────────────────────
-    log.info("📥 Downloading Pixabay clips...")
-    raw_clips = _download_clips(str(topic), n=4)
+    log.info("📥 Downloading Pixabay clips matched to script...")
+    raw_clips = _download_clips(str(topic), n=4, script=script)
 
     # ── Step B: Assemble & normalise background ────────────────────────────
     log.info("🎞  Assembling multi-clip background...")
