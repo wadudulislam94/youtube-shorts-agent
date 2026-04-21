@@ -312,10 +312,15 @@ def _assemble_background(clips: List[Path], total_dur: float) -> Path:
     uid = uuid.uuid4().hex[:8]
     out = config.OUTPUT_VIDEO / f"bg_{uid}.mp4"
 
-    n         = len(clips)
-    clip_dur  = total_dur / n
-    fade_dur  = 0.35
-    fps       = 30
+    n        = len(clips)
+    fade_dur = 0.35
+    fps      = 30
+    # KEY FIX: xfade reduces total duration by (n-1)*fade_dur
+    # So each clip must be longer to compensate:
+    #   total_out = n * clip_dur - (n-1) * fade_dur  → solve for clip_dur
+    n_fades  = max(0, n - 1)
+    clip_dur = (total_dur + n_fades * fade_dur) / n
+    log.info(f"🎞  Clip dur: {clip_dur:.2f}s × {n} clips - {n_fades} fades = {clip_dur*n - n_fades*fade_dur:.2f}s (target {total_dur:.2f}s)")
 
     # Normalize each clip
     normed = []
@@ -362,8 +367,9 @@ def _assemble_background(clips: List[Path], total_dur: float) -> Path:
 
     success = _run(
         inputs
-        + ["-filter_complex", fc, "-map", "[outv]",
-           "-t", str(total_dur),
+        + ["-filter_complex", fc,
+           "-map", "[outv]",
+           "-t", str(total_dur + 0.5),   # slight over-render, trimmed later
            "-r", str(fps),
            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
            "-an", str(out)],
@@ -428,13 +434,15 @@ def _final_render(
         ass_str = parts[0] + "\\:" + parts[1]
 
     # ── Step 1: Burn subtitles ──────────────────────────────────────────────
+    # -stream_loop -1 ensures bg loops if slightly short (prevents freeze)
     subbed = out.parent / f"subbed_{uid}.mp4"
     ok = _run([
+        "-stream_loop", "-1",
         "-i", str(bg),
-        "-t", str(duration),
         "-vf", f"ass='{ass_str}'",
         "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-b:v", "4M",
         "-an",
+        "-t", str(duration),          # output duration limit
         str(subbed),
     ], "burn_subs")
 
