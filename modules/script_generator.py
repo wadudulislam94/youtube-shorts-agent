@@ -113,36 +113,56 @@ Return ONLY this JSON (no other text):
 
 # ── Anime Story Prompt ────────────────────────────────────────────────────────
 
-_ANIME_PROMPT = """You are a viral anime story narrator for YouTube Shorts.
-Your job is to tell a short, dramatic, high-energy anime story in 60 seconds.
+_ANIME_PROMPT = """You are the world's best viral anime short-form storyteller.
+Your Shorts consistently get 500K-5M views because you understand EXACTLY
+what makes someone stop scrolling and watch twice.
 
 Anime Story Concept: "{topic}"
 
-Write a gripping 60-second voiceover script. Follow this EXACT structure:
+Write a 55-65 second narration script using these PROVEN viral formulas:
 
-- HOOK (2 sentences, MAX 3 seconds): Open with an impossibly dramatic statement
-  or a question that makes the viewer NEED to keep watching. Examples:
-  "He died with a controller in his hand. And woke up inside the game."
-  "The hero had one power. And everyone in the kingdom laughed at him."
+════════════════════════════════════════════════════════
+HOOK (FIRST 3 SECONDS — THE MOST IMPORTANT PART):
+  Pick ONE of these proven viral hook formulas and use it:
+  A) POV hook:     "POV: You just died. And the game gave you a second life."
+  B) Question hook: "What if the weakest hero was actually the strongest all along?"
+  C) Stakes hook:  "He had 3 minutes to defeat the Demon Lord. The clock started now."
+  D) Twist hook:   "Everyone thought he was trash. Nobody saw what happened next."
+  E) Impossible hook: "He speedran the entire Demon Lord’s castle. In 47 seconds."
 
-- STORY (5-6 sentences): Tell the story fast and punchy. Use present tense.
-  Build tension. Include a moment of shock or power reveal.
-  Make it feel like a shonen anime episode recap — fast cuts, dramatic beats.
+  The hook MUST:
+  ✓ Be 1-2 short punchy sentences ONLY
+  ✓ Create an INFORMATION GAP (viewer MUST watch to find the answer)
+  ✓ Feel personal — "you", "he", "she" — not abstract
+  ✓ End on an unresolved tension
 
-- CLIFFHANGER CTA (1 sentence): End on a cliffhanger or a hook for the next
-  episode. Examples: "Follow to find out what happens next."
-  "Subscribe — the real battle hasn't even started yet."
+STORY (5-6 SENTENCES):
+  Tell the story in present tense, fast cuts style.
+  Build to ONE shocking moment — the power reveal or plot twist.
+  Use sentence fragments for pace: "He runs. Guards appear. He glitches through the wall."
+  The middle should escalate FAST: weaker → stronger → UNSTOPPABLE.
+
+CLIFFHANGER LOOP CTA (1 SENTENCE):
+  This is critical for RE-WATCH rate. Connect back to the hook.
+  Examples:
+  • "But the Demon Lord had one last trick. And nobody was ready for it."
+  • "The story was just beginning. And it only gets more insane."
+  • "Follow — because episode 2 changes everything."
+  DO NOT say generic "subscribe" or "follow for more" — give a REASON.
+════════════════════════════════════════════════════════
 
 Rules:
-- Total: 90-130 words. Punchy. No hashtags. No asterisks. No markdown. No emojis.
-- Tone: dramatic, cinematic, high-energy. Like a shonen anime trailer narrator.
-- Use short sentences. Hit hard. Build pace.
+- 100-130 words total. Every word must earn its place.
+- Short sentences. Maximum 10 words per sentence.
+- No hashtags. No asterisks. No markdown. No emojis in script.
+- Present tense throughout.
+- End the hook mid-tension — the viewer MUST keep watching.
 
 Return ONLY this JSON (no other text):
 {{
-  "hook": "string",
-  "body": "string",
-  "cta": "string"
+  "hook": "string — the first 1-2 explosive sentences only",
+  "body": "string — the 5-6 sentence story",
+  "cta": "string — cliffhanger that makes them follow"
 }}"""
 
 

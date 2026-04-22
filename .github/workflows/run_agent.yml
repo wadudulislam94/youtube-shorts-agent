@@ -2,8 +2,8 @@ name: YouTube Shorts Agent — Auto Post
 
 on:
   schedule:
-    # Runs every 4 hours = 6 Shorts per day (within YouTube API quota)
-    - cron: '0 */4 * * *'
+    # Runs every 8 hours = 3 Shorts per day (quality over quantity)
+    - cron: '0 */8 * * *'
   workflow_dispatch:
     # Also allows manual trigger from GitHub Actions tab
 
@@ -53,7 +53,7 @@ jobs:
           echo "YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}" >> .env
           echo "CONTENT_NICHE=anime" >> .env
           echo "SHORTS_PER_RUN=1" >> .env
-          echo "SCHEDULE_INTERVAL_HOURS=4" >> .env
+          echo "SCHEDULE_INTERVAL_HOURS=8" >> .env
           echo "WHISPER_MODEL=base" >> .env
           echo "TTS_VOICE=random" >> .env
           echo "YOUTUBE_CLIENT_SECRETS=credentials/client_secrets.json" >> .env

@@ -70,18 +70,20 @@ Return ONLY this JSON (no other text):
 
 
 _ANIME_SEO_PROMPT = """You are a YouTube SEO expert specializing in viral Anime Shorts storytelling.
+You study the top 0.1% of anime Shorts channels and know exactly what titles get clicks.
 
 Generate SEO metadata for this anime YouTube Short:
 Topic: "{topic}"
 Script excerpt: "{excerpt}"
 
-The channel tells short, dramatic anime stories (isekai, shonen, overpowered protagonists).
+The channel posts dramatic anime story Shorts. Each Short is an "episode".
+Fans follow to get the NEXT episode. Retention and follows are the main KPIs.
 
 Return ONLY this JSON (no other text):
 {{
-  "title": "Viral title under 80 characters. Start with an anime-related emoji (⚔2️💫🔥✨🏆✊). Use power words like 'He Speedran', 'She Broke', 'Nobody Expected', 'When The Demon Lord', 'The Hero Who'. Make it sound like a movie trailer. Example: '⚔2️ He Speedran The Entire RPG World In 3 Minutes'",
-  "description": "2-3 punchy sentences recapping the story. Make it sound dramatic and cinematic. End with: Follow for daily anime stories! #shorts #anime #isekai #animeshorts",
-  "tags": ["15 to 20 highly searched YouTube tags for anime/isekai Shorts — mix broad anime terms and story-specific tags"]
+  "title": "Viral title under 75 characters. Use ONE of these proven viral formats (rotate them, don't always use the same one):\n  - POV format:      'POV: You Reincarnated As The Weakest Hero'\n  - When format:     'When The Trash Hero Speedruns The Demon Lord'\n  - Nobody format:   'Nobody Expected Him To Reach The Final Boss In 3 Minutes'\n  - He/She format:   'He Was Called Trash. Then He Broke The Entire Game'\n  - What If format:  'What If A Gamer Got Isekai'd And Skipped Every Quest'\n  Emoji: rotate from 🔥💫⚡🌀🎯👑🤯✨ — match the mood of the story. No sword emoji every time.",
+  "description": "Use the hook sentence from the script as the first line (copy it exactly). Then 1 sentence of story. Then: 'Episode 2 drops soon — follow so you don't miss it!' End with: #shorts #anime #isekai #animeshorts #animestory #overpoweredmc #reincarnation #weakesthero",
+  "tags": ["anime", "shorts", "animeshorts", "isekai", "overpowered", "reincarnation", "animestory", "weakesthero", "demonlord", "rpg", "gamer", "animerecommendations", "animeexplained", "shonen", "manhwa", "lightnovel", "animeclips", "animemoments", "animenarrative", "viral"]
 }}"""
 
 
