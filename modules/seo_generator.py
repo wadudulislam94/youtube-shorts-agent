@@ -27,6 +27,7 @@ CATEGORY_IDS = {
     "motivation": "22",   # People & Blogs
     "history":    "27",
     "tech":       "28",   # Science & Technology
+    "anime":      "24",   # Entertainment
 }
 
 # Core art tags always injected
@@ -34,6 +35,13 @@ _BASE_ART_TAGS = [
     "shorts", "youtube shorts", "art", "crafts", "diy",
     "satisfying", "artprocess", "craftvideos", "handmade",
     "oddlysatisfying", "asmr", "relaxing", "artshorts",
+]
+
+# Core anime tags always injected
+_BASE_ANIME_TAGS = [
+    "shorts", "youtube shorts", "anime", "animeshorts", "isekai",
+    "animestory", "manga", "animefunny", "animemoments", "overpowered",
+    "shonen", "animerecommendations", "animenarrative", "isekaianime",
 ]
 
 
@@ -61,15 +69,38 @@ Return ONLY this JSON (no other text):
 }}"""
 
 
+_ANIME_SEO_PROMPT = """You are a YouTube SEO expert specializing in viral Anime Shorts storytelling.
+
+Generate SEO metadata for this anime YouTube Short:
+Topic: "{topic}"
+Script excerpt: "{excerpt}"
+
+The channel tells short, dramatic anime stories (isekai, shonen, overpowered protagonists).
+
+Return ONLY this JSON (no other text):
+{{
+  "title": "Viral title under 80 characters. Start with an anime-related emoji (⚔2️💫🔥✨🏆✊). Use power words like 'He Speedran', 'She Broke', 'Nobody Expected', 'When The Demon Lord', 'The Hero Who'. Make it sound like a movie trailer. Example: '⚔2️ He Speedran The Entire RPG World In 3 Minutes'",
+  "description": "2-3 punchy sentences recapping the story. Make it sound dramatic and cinematic. End with: Follow for daily anime stories! #shorts #anime #isekai #animeshorts",
+  "tags": ["15 to 20 highly searched YouTube tags for anime/isekai Shorts — mix broad anime terms and story-specific tags"]
+}}"""
+
+
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=3, max=15))
 def generate_seo(topic: str, script: str) -> SEOResult:
-    """Generate viral art/craft SEO metadata using Gemini."""
+    """Generate viral SEO metadata using Gemini. Niche-aware."""
     log.info("Generating SEO metadata...")
+    niche = config.CONTENT_NICHE
 
-    prompt = _SEO_PROMPT.format(
-        topic=topic,
-        excerpt=script[:250].strip(),
-    )
+    if niche == "anime":
+        prompt = _ANIME_SEO_PROMPT.format(
+            topic=topic,
+            excerpt=script[:250].strip(),
+        )
+    else:
+        prompt = _SEO_PROMPT.format(
+            topic=topic,
+            excerpt=script[:250].strip(),
+        )
 
     response = _client.models.generate_content(
         model="gemini-flash-lite-latest",
@@ -97,12 +128,18 @@ def generate_seo(topic: str, script: str) -> SEOResult:
     if len(title) > 100:
         title = title[:97] + "..."
 
-    # Ensure art hashtags in description
-    if "#shorts" not in description.lower():
-        description += "\n\n#shorts #art #crafts #satisfying #diy"
+    # Niche-specific hashtag injection
+    if niche == "anime":
+        if "#shorts" not in description.lower():
+            description += "\n\n#shorts #anime #isekai #animeshorts #animestory"
+        base_tags = _BASE_ANIME_TAGS
+    else:
+        if "#shorts" not in description.lower():
+            description += "\n\n#shorts #art #crafts #satisfying #diy"
+        base_tags = _BASE_ART_TAGS
 
-    # Merge generated tags with base art tags, deduplicate
-    all_tags = list(dict.fromkeys(_BASE_ART_TAGS + [t.lower() for t in tags]))[:30]
+    # Merge generated tags with base tags, deduplicate
+    all_tags = list(dict.fromkeys(base_tags + [t.lower() for t in tags]))[:30]
 
     result = SEOResult(
         title=title,

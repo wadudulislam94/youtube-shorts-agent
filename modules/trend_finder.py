@@ -89,6 +89,16 @@ _VIRAL_SEARCH_QUERIES = {
     "motivation":  ["motivation #shorts", "mindset advice #shorts"],
     "history":     ["history facts #shorts", "historical moments #shorts"],
     "tech":        ["tech facts #shorts", "AI technology #shorts"],
+    "anime":       [
+        "anime isekai #shorts",
+        "anime funny moments #shorts",
+        "anime storyline #shorts",
+        "anime overpowered protagonist #shorts",
+        "anime speedrun #shorts",
+        "anime plot twist #shorts",
+        "shonen anime #shorts",
+        "anime epic moment #shorts",
+    ],
 }
 
 
@@ -264,6 +274,7 @@ def _fetch_reddit_fallback(niche: str) -> Optional[ViralReference]:
 # ── Evergreen Fallback ─────────────────────────────────────────────────────────
 
 _FALLBACK_TOPICS = [
+    # Art/craft
     "Pouring mesmerizing resin ocean art with blue and white pigments",
     "Throwing a perfect clay bowl on the pottery wheel",
     "Painting a misty mountain landscape with wet-on-wet watercolor",
@@ -276,9 +287,24 @@ _FALLBACK_TOPICS = [
     "Casting a glowing resin geode coaster with gold leaf veins",
 ]
 
+_ANIME_FALLBACK_TOPICS = [
+    "A pro speedrunner dies and reincarnates into a fantasy RPG world. He uses game glitches to reach the Demon Lord in 3 minutes.",
+    "A high school student discovers he reincarnated as the final boss. Instead of fighting heroes, he just wants to live a quiet life.",
+    "An isekai hero is told he has the weakest magic class. He uses his real-world engineering knowledge to outsmart every enemy.",
+    "A gamer reincarnates into an anime world but retains his ability to save and reload. He abuses this to become invincible.",
+    "A delivery driver reincarnates as the most feared demon lord. He just wants to make deliveries on time.",
+    "A streamer reincarnates into a fantasy world and accidentally live-streams his adventure to millions of viewers back home.",
+    "An ordinary office worker reincarnates as an S-rank hero. He discovers the world’s actual final boss is his new boss at the adventurer’s guild.",
+    "A chess prodigy reincarnates into a world where magic duels are decided by chess. He wins every war in five moves.",
+    "A speedrunner reincarnates into a fantasy RPG and skips the entire main quest through a wall clip, ending the story in minutes.",
+    "A lazy student reincarnates into an isekai and immediately finds every exploit and cheat code in the world’s rules.",
+]
+
 def _evergreen_fallback() -> ViralReference:
-    topic = random.choice(_FALLBACK_TOPICS)
-    log.info(f"🔒 Evergreen fallback: {topic[:70]}...")
+    niche = config.CONTENT_NICHE
+    pool  = _ANIME_FALLBACK_TOPICS if niche == "anime" else _FALLBACK_TOPICS
+    topic = random.choice(pool)
+    log.info(f"🔒 Evergreen fallback [{niche}]: {topic[:70]}...")
     return ViralReference(topic=topic, title=topic, source="fallback")
 
 

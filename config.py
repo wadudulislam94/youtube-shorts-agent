@@ -45,11 +45,20 @@ TTS_VOICES = [
     "en-AU-NatashaNeural",      # Australian female, upbeat
 ]
 
+# Voices best suited per niche (overrides random pick when niche matches)
+NICHE_VOICE_MAP = {
+    "anime": "en-US-GuyNeural",       # Youthful male — perfect for anime protagonist
+    "motivation": "en-US-ChristopherNeural",
+    "finance": "en-US-TonyNeural",
+    "history": "en-GB-RyanNeural",
+    "tech": "en-US-DavisNeural",
+}
+
 # ── Whisper Settings (local transcription — FREE) ─────────────────────────────
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
 
 # ── Content Settings ──────────────────────────────────────────────────────────
-CONTENT_NICHE            = os.getenv("CONTENT_NICHE", "art")
+CONTENT_NICHE            = os.getenv("CONTENT_NICHE", "anime")  # art | anime | facts | finance | motivation | history | tech
 SHORTS_PER_RUN           = int(os.getenv("SHORTS_PER_RUN", "1"))
 SCHEDULE_INTERVAL_HOURS  = int(os.getenv("SCHEDULE_INTERVAL_HOURS", "6"))
 
@@ -135,6 +144,16 @@ NICHE_CONFIG = {
         "bg_video_query": "futuristic technology abstract neon",
         "tone": "fast-paced and awe-inspiring",
         "gemini_persona": "a futurist tech journalist breaking big news",
+    },
+    "anime": {
+        "subreddits": ["anime", "Animemes", "isekai", "manga", "shonenjump"],
+        "rss_feeds": [
+            "https://myanimelist.net/rss/news.xml",
+            "https://www.animenewsnetwork.com/all/rss.xml?ann-edition=us",
+        ],
+        "bg_video_query": "anime fantasy magic landscape cinematic",
+        "tone": "dramatic, high-energy, and cinematic — like a shonen anime trailer",
+        "gemini_persona": "an anime narrator delivering an epic battle monologue",
     },
 }
 

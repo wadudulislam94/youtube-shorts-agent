@@ -111,6 +111,41 @@ Return ONLY this JSON (no other text):
 }}"""
 
 
+# ── Anime Story Prompt ────────────────────────────────────────────────────────
+
+_ANIME_PROMPT = """You are a viral anime story narrator for YouTube Shorts.
+Your job is to tell a short, dramatic, high-energy anime story in 60 seconds.
+
+Anime Story Concept: "{topic}"
+
+Write a gripping 60-second voiceover script. Follow this EXACT structure:
+
+- HOOK (2 sentences, MAX 3 seconds): Open with an impossibly dramatic statement
+  or a question that makes the viewer NEED to keep watching. Examples:
+  "He died with a controller in his hand. And woke up inside the game."
+  "The hero had one power. And everyone in the kingdom laughed at him."
+
+- STORY (5-6 sentences): Tell the story fast and punchy. Use present tense.
+  Build tension. Include a moment of shock or power reveal.
+  Make it feel like a shonen anime episode recap — fast cuts, dramatic beats.
+
+- CLIFFHANGER CTA (1 sentence): End on a cliffhanger or a hook for the next
+  episode. Examples: "Follow to find out what happens next."
+  "Subscribe — the real battle hasn't even started yet."
+
+Rules:
+- Total: 90-130 words. Punchy. No hashtags. No asterisks. No markdown. No emojis.
+- Tone: dramatic, cinematic, high-energy. Like a shonen anime trailer narrator.
+- Use short sentences. Hit hard. Build pace.
+
+Return ONLY this JSON (no other text):
+{{
+  "hook": "string",
+  "body": "string",
+  "cta": "string"
+}}"""
+
+
 # ── Main Generator ─────────────────────────────────────────────────────────────
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=3, max=15))
@@ -124,9 +159,14 @@ def generate_script(topic_or_ref) -> ScriptResult:
     from modules.trend_finder import ViralReference
 
     topic = str(topic_or_ref)
+    niche = config.CONTENT_NICHE
 
     # Decide which prompt to use
-    if isinstance(topic_or_ref, ViralReference) and topic_or_ref.source == "youtube_viral":
+    if niche == "anime":
+        strategy = "anime_story"
+        prompt = _ANIME_PROMPT.format(topic=topic)
+        log.info(f"⚔️  Anime narrator mode — {topic[:60]}")
+    elif isinstance(topic_or_ref, ViralReference) and topic_or_ref.source == "youtube_viral":
         strategy = "viral_clone"
         viral_context = topic_or_ref.viral_context_for_gemini()
         prompt = _VIRAL_PROMPT.format(

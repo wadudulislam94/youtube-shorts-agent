@@ -26,11 +26,20 @@ log = get_logger("TTSGenerator")
 
 
 def _pick_voice() -> str:
-    """Select a TTS voice. 'random' picks a different one each video."""
+    """Select a TTS voice — niche-aware, then random, then explicit config."""
+    # 1. Niche-pinned voice (e.g. anime always uses GuyNeural)
+    niche_map = getattr(config, "NICHE_VOICE_MAP", {})
+    niche = config.CONTENT_NICHE
+    if niche in niche_map:
+        voice = niche_map[niche]
+        log.info(f"🎙️  Niche-pinned voice [{niche}]: {voice}")
+        return voice
+    # 2. Random (default)
     if config.TTS_VOICE.lower() == "random":
         voice = random.choice(config.TTS_VOICES)
-        log.info(f"🎙️  Selected voice: {voice}")
+        log.info(f"🎙️  Random voice: {voice}")
         return voice
+    # 3. Explicit env override
     return config.TTS_VOICE
 
 
@@ -41,15 +50,22 @@ def _output_path() -> Path:
     return path
 
 
+def _pick_rate() -> str:
+    """Anime stories sound better faster; other niches use a modest boost."""
+    if config.CONTENT_NICHE == "anime":
+        return "+18%"   # High-energy anime trailer pacing
+    return "+10%"       # Standard energetic Shorts pacing
+
+
 async def _edge_tts_async(script: str, voice: str, output_path: Path) -> None:
     """
     Async core function for edge-tts generation.
-    Uses +10% speaking rate for energetic Shorts delivery.
+    Speaking rate is niche-aware (anime = +18%, others = +10%).
     """
     communicate = edge_tts.Communicate(
         text=script,
         voice=voice,
-        rate="+10%",      # Slightly faster = more energetic
+        rate=_pick_rate(),
         volume="+0%",
         pitch="+0Hz",
     )

@@ -133,6 +133,17 @@ _ART_FALLBACKS = [
     "painting artist studio",
 ]
 
+_ANIME_FALLBACKS = [
+    "fantasy landscape cinematic",
+    "magic sword fight fantasy",
+    "epic fantasy battle cinematic",
+    "dragon fantasy landscape",
+    "neon city cyberpunk night",
+    "anime style fantasy art",
+    "samurai sword fight cinematic",
+    "magic spell fantasy cinematic",
+]
+
 _KEYWORD_QUERY_MAP = [
     (["resin", "epoxy pour", "resin art"],                   "resin art pour satisfying"),
     (["pottery", "clay wheel", "ceramic", "throwing"],        "pottery wheel clay throwing"),
@@ -162,6 +173,20 @@ _KEYWORD_QUERY_MAP = [
     (["knife", "blade", "blacksmith"],                       "blacksmith knife making forge"),
     (["satisfying", "oddly", "mesmeriz", "timelapse"],       "satisfying craft timelapse"),
     (["paint", "brush", "color"],                            "painting art brush process"),
+    # Anime / fantasy keywords
+    (["speedrun", "glitch", "rpg", "gamer", "game"],         "fantasy rpg game magic cinematic"),
+    (["demon lord", "demon king", "final boss"],             "dark fantasy castle cinematic"),
+    (["isekai", "reincarnate", "reincarnation"],             "fantasy landscape magic portal"),
+    (["samurai", "sword", "katana", "warrior"],              "samurai sword fight cinematic"),
+    (["magic", "spell", "mage", "wizard", "sorcerer"],       "magic spell fantasy effect"),
+    (["dragon", "beast", "monster"],                         "dragon fantasy cinematic"),
+    (["hero", "protagonist", "chosen one"],                  "epic fantasy hero cinematic"),
+    (["battle", "fight", "clash", "war"],                    "epic fantasy battle cinematic"),
+    (["kingdom", "castle", "dungeon", "quest"],              "medieval castle fantasy cinematic"),
+    (["power", "level", "overpowered", "strongest"],         "neon energy power cinematic"),
+    (["cyberpunk", "neon", "futuristic city"],               "cyberpunk neon city night"),
+    (["streamer", "live", "broadcast"],                      "neon technology screen broadcast"),
+    (["chess", "strategy", "mastermind"],                    "chess board strategy cinematic"),
 ]
 
 
@@ -179,10 +204,16 @@ def _topic_queries(topic: str, script: str = "") -> List[str]:
                 break
 
     if not matched:
-        matched = [random.choice(_ART_FALLBACKS)]
+        # Use niche-appropriate fallback queries
+        import config as _cfg
+        if _cfg.CONTENT_NICHE == "anime":
+            matched = [random.choice(_ANIME_FALLBACKS)]
+        else:
+            matched = [random.choice(_ART_FALLBACKS)]
 
     # Add a variety fallback as a 4th option
-    matched.append(random.choice(_ART_FALLBACKS))
+    fallback_pool = _ANIME_FALLBACKS if (len(matched) > 0 and matched[0] in _ANIME_FALLBACKS) else _ART_FALLBACKS
+    matched.append(random.choice(fallback_pool))
     log.info(f"🎯 Pixabay queries from script: {matched[:3]}")
     return matched[:4]
 
