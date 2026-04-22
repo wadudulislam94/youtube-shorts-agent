@@ -30,6 +30,7 @@ from modules.subtitle_generator import generate_subtitles
 from modules.video_builder import build_video
 from modules.seo_generator import generate_seo
 from modules.uploader import upload_to_youtube
+from modules.cross_poster import cross_post
 
 log = get_logger("Main")
 
@@ -91,19 +92,30 @@ def run_pipeline() -> bool:
         log.info("\n📤 STEP 5/5 — SEO + YouTube Upload")
         seo = generate_seo(topic=topic, script=script_result.full_script)
 
-        video_id = upload_to_youtube(video_path=video_path, seo=seo)
+        video_id  = upload_to_youtube(video_path=video_path, seo=seo)
         short_url = f"https://www.youtube.com/shorts/{video_id}"
+
+        # ── Step 6: Cross-post to TikTok + Instagram ──────────────────────────
+        log.info("\n📲 STEP 6 — Cross-posting to TikTok + Instagram")
+        social = cross_post(
+            video_path=video_path,
+            title=seo.title,
+            description=seo.description,
+        )
 
         # ── Summary ───────────────────────────────────────────────────────────
         elapsed = (datetime.now() - start_time).total_seconds()
         log.info("\n" + "=" * 65)
         log.info(f"🎉 Pipeline COMPLETE in {elapsed:.0f}s")
-        log.info(f"   📺 Short URL: {short_url}")
+        log.info(f"   📺 YouTube:   {short_url}")
+        log.info(f"   📱 TikTok:    {social.get('tiktok', 'skipped')}")
+        log.info(f"   📷 Instagram: {social.get('instagram', 'skipped')}")
         log.info(f"   📌 Title:     {seo.title}")
         log.info("=" * 65 + "\n")
 
         _save_run_record(topic, seo, video_id, short_url, elapsed)
         return True
+
 
     except Exception as e:
         log.error(f"❌ Pipeline FAILED: {type(e).__name__}: {e}")
