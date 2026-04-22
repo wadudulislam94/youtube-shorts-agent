@@ -68,7 +68,7 @@ VIDEO_HEIGHT   = 1920
 VIDEO_FPS      = 30
 VIDEO_BITRATE  = "8000k"
 
-# ── Subtitle Styling ──────────────────────────────────────────────────────────
+# ── Subtitle Styling (default — art/facts/etc niches) ──────────────────────────
 SUBTITLE_FONT_NAME       = "Roboto"          # Installed via apt in GitHub Actions
 SUBTITLE_FONT_SIZE       = 88
 SUBTITLE_FONT_COLOR      = "white"
@@ -77,6 +77,28 @@ SUBTITLE_STROKE_COLOR    = "black"
 SUBTITLE_STROKE_WIDTH    = 4
 SUBTITLE_WORDS_PER_LINE  = 3
 SUBTITLE_Y_POSITION      = 0.55             # 0=top, 1=bottom
+
+# ── Anime Subtitle Styling (premium cinematic look) ───────────────────────────
+# Designed to sit in the lower-third without covering anime art panels.
+# Inspired by anime movie subtitles + TikTok karaoke style.
+ANIME_SUBTITLE = {
+    "font":            "Roboto",
+    "size":            106,            # Bigger = more punch
+    "words_per_line":  2,              # 2 words = max drama per beat
+    "margin_v":        200,            # px from bottom edge (lower third)
+    "outline_width":   9,             # Thick black outline = readable on any bg
+    "shadow_depth":    5,             # Deep drop shadow for depth
+    "active_scale":    125,           # Active word pops to 125% size
+    # ASS colour format = AABBGGRR (alpha, blue, green, red)
+    # ─ Inactive words ─
+    "color_inactive":  "&H00FFFFFF",  # Pure white
+    "outline_inactive":"&H00000000",  # Black outline
+    # ─ Active word ─
+    "color_active":    "&H0000FFFF",  # Bright yellow/gold — most eye-catching
+    "outline_active":  "&H00003080",  # Deep amber glow outline (AABBGGRR: R=80, G=30, B=00)
+    # ─ Shadow ─
+    "shadow_color":    "&HAA000000",  # Semi-transparent black shadow
+}
 
 # ── Niche Configuration ───────────────────────────────────────────────────────
 NICHE_CONFIG = {

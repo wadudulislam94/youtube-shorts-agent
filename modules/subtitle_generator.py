@@ -163,21 +163,23 @@ def generate_subtitles(
 ) -> List[SubtitleChunk]:
     """
     Generate karaoke-style subtitle chunks using local Whisper.
-
-    Args:
-        audio_path: Path to the .mp3 voiceover file.
-        script:     Full script text (used for fallback only).
-        duration:   Audio duration in seconds.
-
-    Returns:
-        List of SubtitleChunk objects ready for video_builder.
+    Words per chunk is niche-aware: anime=2 (drama), others=3 from config.
     """
     log.info(f"🔤 Generating subtitles for {duration:.1f}s audio...")
+
+    # Niche-aware words per chunk
+    anime_cfg = getattr(config, "ANIME_SUBTITLE", {})
+    words_per_chunk = (
+        anime_cfg.get("words_per_line", 2)
+        if config.CONTENT_NICHE == "anime"
+        else config.SUBTITLE_WORDS_PER_LINE
+    )
+    log.info(f"   Words per chunk: {words_per_chunk} (niche={config.CONTENT_NICHE})")
 
     try:
         word_timestamps = _transcribe_with_whisper(audio_path)
         if word_timestamps:
-            chunks = _build_chunks(word_timestamps, config.SUBTITLE_WORDS_PER_LINE)
+            chunks = _build_chunks(word_timestamps, words_per_chunk)
             log.info(f"✅ {len(chunks)} subtitle chunks generated via Whisper")
             return chunks
     except Exception as e:
@@ -185,6 +187,7 @@ def generate_subtitles(
 
     # Fallback
     word_timestamps = _distribute_timestamps(script, duration)
-    chunks = _build_chunks(word_timestamps, config.SUBTITLE_WORDS_PER_LINE)
+    chunks = _build_chunks(word_timestamps, words_per_chunk)
     log.info(f"✅ {len(chunks)} subtitle chunks generated via fallback")
     return chunks
+

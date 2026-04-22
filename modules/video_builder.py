@@ -48,10 +48,111 @@ def _ass_ts(sec: float) -> str:
 
 def _generate_ass(chunks: List[SubtitleChunk], accent: str, out: Path) -> Path:
     """
-    Generate .ass subtitle file with:
-    - All words in a chunk shown together
-    - Active word highlighted in accent colour + slightly larger
-    - Pop-in scale animation on first word of each chunk
+    Generate .ass subtitle file.
+    Routes to anime style or standard style based on CONTENT_NICHE.
+    """
+    if config.CONTENT_NICHE == "anime":
+        return _generate_ass_anime(chunks, out)
+    return _generate_ass_standard(chunks, accent, out)
+
+
+def _generate_ass_anime(chunks: List[SubtitleChunk], out: Path) -> Path:
+    """
+    Premium anime-style karaoke subtitles:
+    - 106px Roboto Bold, lower-third position (MarginV=200)
+    - Inactive: pure white with 9px black outline + 5px drop shadow
+    - Active:   bright gold, 125% scale, amber glow outline
+    - Entry:    punch-in (0→130→125%) + shadow burst for drama
+    - 2 words per chunk for maximum per-beat impact
+    """
+    s = config.ANIME_SUBTITLE
+    font      = s["font"]
+    size      = s["size"]
+    margin_v  = s["margin_v"]
+    outline   = s["outline_width"]
+    shadow    = s["shadow_depth"]
+    scale_act = s["active_scale"]
+    c_inact   = s["color_inactive"]
+    c_act     = s["color_active"]
+    ol_act    = s["outline_active"]
+    shad_col  = s["shadow_color"]
+
+    header = f"""[Script Info]
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+PlayResX: 1080
+PlayResY: 1920
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: AnimeNorm,{font},{size},{c_inact},&H000000FF,&H00000000,{shad_col},-1,0,0,0,100,100,3,0,1,{outline},{shadow},2,60,60,{margin_v},1
+Style: AnimeAct,{font},{size},{c_act},&H000000FF,{ol_act},{shad_col},-1,0,0,0,100,100,3,0,1,{outline+1},{shadow},2,60,60,{margin_v},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    events = []
+
+    for chunk in chunks:
+        if not chunk.words:
+            continue
+
+        words = chunk.words
+
+        for active_idx, active_word in enumerate(words):
+            parts = []
+            for i, w in enumerate(words):
+                txt = w.word.strip().upper()
+                if not txt:
+                    continue
+                if i == active_idx:
+                    parts.append(
+                        r"{\c" + c_act +
+                        r"\3c" + ol_act +
+                        rf"\fscx{scale_act}\fscy{scale_act}" +
+                        r"}" + txt + r"{\r}"
+                    )
+                else:
+                    parts.append(
+                        r"{\c" + c_inact +
+                        r"\3c&H00000000&" +
+                        r"\fscx100\fscy100}" + txt + r"{\r}"
+                    )
+
+            if not parts:
+                continue
+
+            line = "   ".join(parts)
+            ts   = _ass_ts(active_word.start)
+            te   = _ass_ts(active_word.end + 0.05)
+
+            if active_idx == 0:
+                # Punch-in: 0 → 130% overshoot → settle at active_scale% + shadow burst
+                pfx = (
+                    r"{\fscx0\fscy0"
+                    r"\t(0,80,\fscx130\fscy130)"
+                    rf"\t(80,160,\fscx{scale_act}\fscy{scale_act})"
+                    r"\t(0,40,\shad8)"
+                    r"\t(40,160,\shad" + str(shadow) + r")}"
+                )
+                events.append(
+                    f"Dialogue: 0,{ts},{te},AnimeNorm,,0,0,0,,{pfx}{line}"
+                )
+            else:
+                events.append(
+                    f"Dialogue: 0,{ts},{te},AnimeNorm,,0,0,0,,{line}"
+                )
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(header + "\n".join(events), encoding="utf-8")
+    log.info(f"⚔️  Anime ASS subtitles: {len(events)} events → {out.name}")
+    return out
+
+
+def _generate_ass_standard(chunks: List[SubtitleChunk], accent: str, out: Path) -> Path:
+    """
+    Original Hormozi-style word-by-word karaoke subtitles (non-anime niches).
     """
     font = getattr(config, "SUBTITLE_FONT_NAME", "Arial")
 
