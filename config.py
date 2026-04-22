@@ -78,26 +78,24 @@ SUBTITLE_STROKE_WIDTH    = 4
 SUBTITLE_WORDS_PER_LINE  = 3
 SUBTITLE_Y_POSITION      = 0.55             # 0=top, 1=bottom
 
-# ── Anime Subtitle Styling (premium cinematic look) ───────────────────────────
-# Designed to sit in the lower-third without covering anime art panels.
-# Inspired by anime movie subtitles + TikTok karaoke style.
+# ── Anime Subtitle Styling (calm, readable streaming style — like Crunchyroll/Netflix) ───────────────────────────
+# Each subtitle shows 5 words as one complete readable phrase.
+# Semi-transparent dark box behind text ensures readability on any background.
+# One subtitle event per phrase — NO overlapping, NO chaotic animation.
 ANIME_SUBTITLE = {
     "font":            "Roboto",
-    "size":            106,            # Bigger = more punch
-    "words_per_line":  2,              # 2 words = max drama per beat
-    "margin_v":        200,            # px from bottom edge (lower third)
-    "outline_width":   9,             # Thick black outline = readable on any bg
-    "shadow_depth":    5,             # Deep drop shadow for depth
-    "active_scale":    125,           # Active word pops to 125% size
-    # ASS colour format = AABBGGRR (alpha, blue, green, red)
-    # ─ Inactive words ─
-    "color_inactive":  "&H00FFFFFF",  # Pure white
-    "outline_inactive":"&H00000000",  # Black outline
-    # ─ Active word ─
-    "color_active":    "&H0000FFFF",  # Bright yellow/gold — most eye-catching
-    "outline_active":  "&H00003080",  # Deep amber glow outline (AABBGGRR: R=80, G=30, B=00)
-    # ─ Shadow ─
-    "shadow_color":    "&HAA000000",  # Semi-transparent black shadow
+    "size":            96,             # Large enough to read comfortably
+    "words_per_line":  5,              # 5 words = full readable phrase at a time
+    "margin_v":        320,            # px from bottom (safe zone, not cut off)
+    "outline_width":   3,             # Thin outline (background box handles readability)
+    "shadow_depth":    2,             # Subtle shadow
+    "border_style":    3,             # 3 = filled box background behind text
+    # ASS colour format = AABBGGRR (alpha=00 is fully opaque)
+    "color_text":      "&H00FFFFFF",  # Pure white text
+    "outline_color":   "&H00000000",  # Black outline
+    "back_color":      "&HAA000000",  # Semi-transparent black box (AA=66% opacity)
+    # Active word highlight (karaoke word)
+    "color_active":    "&H0000FFFF",  # Gold/yellow — current word
 }
 
 # ── Niche Configuration ───────────────────────────────────────────────────────

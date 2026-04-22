@@ -58,25 +58,30 @@ def _generate_ass(chunks: List[SubtitleChunk], accent: str, out: Path) -> Path:
 
 def _generate_ass_anime(chunks: List[SubtitleChunk], out: Path) -> Path:
     """
-    Premium anime-style karaoke subtitles:
-    - 106px Roboto Bold, lower-third position (MarginV=200)
-    - Inactive: pure white with 9px black outline + 5px drop shadow
-    - Active:   bright gold, 125% scale, amber glow outline
-    - Entry:    punch-in (0→130→125%) + shadow burst for drama
-    - 2 words per chunk for maximum per-beat impact
-    """
-    s = config.ANIME_SUBTITLE
-    font      = s["font"]
-    size      = s["size"]
-    margin_v  = s["margin_v"]
-    outline   = s["outline_width"]
-    shadow    = s["shadow_depth"]
-    scale_act = s["active_scale"]
-    c_inact   = s["color_inactive"]
-    c_act     = s["color_active"]
-    ol_act    = s["outline_active"]
-    shad_col  = s["shadow_color"]
+    Clean, readable streaming-style anime subtitles (Crunchyroll/Netflix style).
 
+    KEY DESIGN:
+    - ONE dialogue event per 5-word phrase  → zero overlapping lines
+    - BorderStyle=3 semi-transparent black box → readable on ANY background
+    - \\kf karaoke: words sweep white→gold as spoken (subtle, not chaotic)
+    - MarginV=320 → sits safely above the bottom edge, never cut off
+    - 96px font — comfortable reading size
+    """
+    s        = config.ANIME_SUBTITLE
+    font     = s["font"]
+    size     = s["size"]
+    margin_v = s["margin_v"]
+    outline  = s["outline_width"]
+    shadow   = s["shadow_depth"]
+    c_active = s["color_active"]   # gold  — Primary   (word while being spoken)
+    c_text   = s["color_text"]     # white — Secondary (word not yet spoken)
+    c_out    = s["outline_color"]  # black outline
+    c_back   = s["back_color"]     # semi-transparent black box
+
+    # Style: Primary=gold (spoken), Secondary=white (unspoken), BorderStyle=3 (box)
+    # Format: Name Fontname Fontsize PrimaryColour SecondaryColour OutlineColour BackColour
+    #         Bold Italic Underline StrikeOut ScaleX ScaleY Spacing Angle
+    #         BorderStyle Outline Shadow Alignment MarginL MarginR MarginV Encoding
     header = f"""[Script Info]
 ScriptType: v4.00+
 WrapStyle: 0
@@ -86,68 +91,64 @@ PlayResY: 1920
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: AnimeNorm,{font},{size},{c_inact},&H000000FF,&H00000000,{shad_col},-1,0,0,0,100,100,3,0,1,{outline},{shadow},2,60,60,{margin_v},1
-Style: AnimeAct,{font},{size},{c_act},&H000000FF,{ol_act},{shad_col},-1,0,0,0,100,100,3,0,1,{outline+1},{shadow},2,60,60,{margin_v},1
+Style: AnimeKara,{font},{size},{c_active},{c_text},{c_out},{c_back},-1,0,0,0,100,100,1,0,3,{outline},{shadow},2,80,80,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    events = []
-
+    # ── Collect all unique word timestamps from chunks ────────────────────────
+    seen: set = set()
+    all_words = []
     for chunk in chunks:
-        if not chunk.words:
+        for w in chunk.words:
+            key = (round(w.start, 3), w.word.strip().lower())
+            if key not in seen:
+                seen.add(key)
+                all_words.append(w)
+    all_words.sort(key=lambda w: w.start)
+
+    if not all_words:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(header, encoding="utf-8")
+        return out
+
+    # ── Group into 5-word phrases ─────────────────────────────────────────────
+    phrase_size = s.get("words_per_line", 5)
+    phrases = [
+        all_words[i : i + phrase_size]
+        for i in range(0, len(all_words), phrase_size)
+    ]
+
+    events = []
+    for phrase in phrases:
+        if not phrase:
             continue
 
-        words = chunk.words
+        ts = _ass_ts(phrase[0].start)
+        te = _ass_ts(phrase[-1].end + 0.15)   # small buffer after last word
 
-        for active_idx, active_word in enumerate(words):
-            parts = []
-            for i, w in enumerate(words):
-                txt = w.word.strip().upper()
-                if not txt:
-                    continue
-                if i == active_idx:
-                    parts.append(
-                        r"{\c" + c_act +
-                        r"\3c" + ol_act +
-                        rf"\fscx{scale_act}\fscy{scale_act}" +
-                        r"}" + txt + r"{\r}"
-                    )
-                else:
-                    parts.append(
-                        r"{\c" + c_inact +
-                        r"\3c&H00000000&" +
-                        r"\fscx100\fscy100}" + txt + r"{\r}"
-                    )
-
-            if not parts:
+        # Build \kf karaoke line — ONE event per phrase, no overlap possible
+        kara_parts = []
+        for w in phrase:
+            txt = w.word.strip().upper()
+            if not txt:
                 continue
+            # Duration in centiseconds (100cs = 1 second)
+            dur_cs = max(5, round((w.end - w.start) * 100))
+            kara_parts.append(f"{{\\kf{dur_cs}}}{txt}")
 
-            line = "   ".join(parts)
-            ts   = _ass_ts(active_word.start)
-            te   = _ass_ts(active_word.end + 0.05)
+        if not kara_parts:
+            continue
 
-            if active_idx == 0:
-                # Punch-in: 0 → 130% overshoot → settle at active_scale% + shadow burst
-                pfx = (
-                    r"{\fscx0\fscy0"
-                    r"\t(0,80,\fscx130\fscy130)"
-                    rf"\t(80,160,\fscx{scale_act}\fscy{scale_act})"
-                    r"\t(0,40,\shad8)"
-                    r"\t(40,160,\shad" + str(shadow) + r")}"
-                )
-                events.append(
-                    f"Dialogue: 0,{ts},{te},AnimeNorm,,0,0,0,,{pfx}{line}"
-                )
-            else:
-                events.append(
-                    f"Dialogue: 0,{ts},{te},AnimeNorm,,0,0,0,,{line}"
-                )
+        line = "  ".join(kara_parts)
+        events.append(f"Dialogue: 0,{ts},{te},AnimeKara,,0,0,0,,{line}")
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(header + "\n".join(events), encoding="utf-8")
-    log.info(f"⚔️  Anime ASS subtitles: {len(events)} events → {out.name}")
+    log.info(f"✅ Anime subtitles: {len(events)} phrase events ({len(all_words)} words) → {out.name}")
     return out
+
+
 
 
 def _generate_ass_standard(chunks: List[SubtitleChunk], accent: str, out: Path) -> Path:
