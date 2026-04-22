@@ -51,7 +51,7 @@ jobs:
           echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
           echo "PIXABAY_API_KEY=${{ secrets.PIXABAY_API_KEY }}" >> .env
           echo "YOUTUBE_API_KEY=${{ secrets.YOUTUBE_API_KEY }}" >> .env
-          echo "CONTENT_NICHE=art" >> .env
+          echo "CONTENT_NICHE=anime" >> .env
           echo "SHORTS_PER_RUN=1" >> .env
           echo "SCHEDULE_INTERVAL_HOURS=4" >> .env
           echo "WHISPER_MODEL=base" >> .env
@@ -80,11 +80,11 @@ jobs:
         run: |
           mkdir -p assets/music
           # Only download if not already cached
-          if [ ! -f assets/music/lofi1.mp3 ]; then
-            echo "Downloading royalty-free BGM tracks..."
-            curl -L -o assets/music/lofi1.mp3 "https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0c6ff1bbb.mp3" 2>/dev/null || true
-            curl -L -o assets/music/lofi2.mp3 "https://cdn.pixabay.com/download/audio/2022/08/02/audio_884fe92c21.mp3" 2>/dev/null || true
-            curl -L -o assets/music/ambient1.mp3 "https://cdn.pixabay.com/download/audio/2022/03/10/audio_c8c8a73467.mp3" 2>/dev/null || true
+          if [ ! -f assets/music/epic1.mp3 ]; then
+            echo "Downloading royalty-free EPIC/CINEMATIC BGM tracks for anime..."
+            curl -L -o assets/music/epic1.mp3 "https://cdn.pixabay.com/download/audio/2022/11/22/audio_febc508520.mp3" 2>/dev/null || true
+            curl -L -o assets/music/epic2.mp3 "https://cdn.pixabay.com/download/audio/2023/04/10/audio_946e9bae24.mp3" 2>/dev/null || true
+            curl -L -o assets/music/epic3.mp3 "https://cdn.pixabay.com/download/audio/2022/10/25/audio_fbc1e29494.mp3" 2>/dev/null || true
             # Remove any empty files
             find assets/music -size 0 -delete 2>/dev/null || true
             echo "BGM files: $(ls assets/music/ 2>/dev/null)"

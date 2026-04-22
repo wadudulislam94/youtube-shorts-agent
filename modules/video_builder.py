@@ -262,7 +262,54 @@ def _dl_clip(hit: dict, idx: int) -> Optional[Path]:
         return None
 
 
+def _image_to_clip(img_path: Path, idx: int, dur: float = 20.0) -> Optional[Path]:
+    """
+    Convert a still image (JPEG/PNG) to a short MP4 clip.
+    Used to turn Pollinations anime panels into video clips.
+    """
+    uid = uuid.uuid4().hex[:6]
+    dst = config.OUTPUT_VIDEO / f"img_clip_{idx}_{uid}.mp4"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    ok = _run([
+        "-loop", "1",
+        "-i", str(img_path),
+        "-t", str(dur + 1.0),
+        "-vf", f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
+        "-r", "30",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22",
+        "-an", str(dst),
+    ], "img_to_clip")
+    return dst if ok and dst.exists() else None
+
+
 def _download_clips(topic: str, n: int = 4, script: str = "") -> List[Path]:
+    """
+    For ANIME niche: generate AI anime panels via Pollinations, then convert to clips.
+    For all other niches: download stock footage from Pixabay.
+    """
+    # ── Anime mode: AI-generated art panels ──────────────────────────────────
+    if config.CONTENT_NICHE == "anime":
+        try:
+            from modules.anime_image_generator import generate_anime_panels
+            log.info("🎨 Anime mode: generating AI art panels instead of Pixabay clips")
+            images = generate_anime_panels(topic, script)
+            clips = []
+            for i, img in enumerate(images):
+                clip = _image_to_clip(img, i, dur=20.0)
+                if clip:
+                    clips.append(clip)
+                    log.info(f"  🎞 Panel {i+1} converted to video clip")
+                try:
+                    img.unlink()
+                except Exception:
+                    pass
+            if clips:
+                return clips
+            log.warning("Anime panel conversion failed — falling back to Pixabay")
+        except Exception as e:
+            log.warning(f"Anime image generation failed: {e} — falling back to Pixabay")
+
+    # ── Standard mode: Pixabay stock footage ─────────────────────────────────
     queries  = _topic_queries(topic, script)
     clips    = []
     seen_ids: set = set()
@@ -289,6 +336,7 @@ def _download_clips(topic: str, n: int = 4, script: str = "") -> List[Path]:
                 break
 
     return clips
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
