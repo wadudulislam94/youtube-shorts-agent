@@ -236,6 +236,11 @@ _ART_SUBREDDITS = [
     "woodworking", "pottery", "DIY", "Art", "drawing",
 ]
 
+_ANIME_SUBREDDITS = [
+    "Animesuggest", "isekai", "manhwa", "anime",
+    "LightNovels", "animememes", "shonenjump", "webtoons",
+]
+
 def _fetch_reddit_fallback(niche: str) -> Optional[ViralReference]:
     """Reddit-based topic discovery as fallback."""
     niche_cfg  = config.get_niche()
@@ -288,22 +293,104 @@ _FALLBACK_TOPICS = [
 ]
 
 _ANIME_FALLBACK_TOPICS = [
-    "A pro speedrunner dies and reincarnates into a fantasy RPG world. He uses game glitches to reach the Demon Lord in 3 minutes.",
-    "A high school student discovers he reincarnated as the final boss. Instead of fighting heroes, he just wants to live a quiet life.",
-    "An isekai hero is told he has the weakest magic class. He uses his real-world engineering knowledge to outsmart every enemy.",
-    "A gamer reincarnates into an anime world but retains his ability to save and reload. He abuses this to become invincible.",
-    "A delivery driver reincarnates as the most feared demon lord. He just wants to make deliveries on time.",
-    "A streamer reincarnates into a fantasy world and accidentally live-streams his adventure to millions of viewers back home.",
-    "An ordinary office worker reincarnates as an S-rank hero. He discovers the world’s actual final boss is his new boss at the adventurer’s guild.",
-    "A chess prodigy reincarnates into a world where magic duels are decided by chess. He wins every war in five moves.",
-    "A speedrunner reincarnates into a fantasy RPG and skips the entire main quest through a wall clip, ending the story in minutes.",
-    "A lazy student reincarnates into an isekai and immediately finds every exploit and cheat code in the world’s rules.",
+    'A pro speedrunner dies and reincarnates into a fantasy RPG. He exploits glitches to reach the Demon Lord in 3 minutes.',
+    'A high school student reincarnates as the final boss. He just wants a quiet life but heroes keep attacking.',
+    'An isekai hero given the Trash magic class uses real-world physics to outsmart every S-rank mage.',
+    'A gamer reincarnates with save-and-reload ability and abuses it to become the only unkillable being.',
+    'A delivery driver reincarnates as the most feared demon lord and just wants to deliver packages on time.',
+    'A Twitch streamer reincarnates into a fantasy world and accidentally streams his adventure to millions back home.',
+    'An office worker reincarnates as an S-rank hero but his new guild manager is the actual final boss.',
+    'A chess prodigy reincarnates into a world where wars are decided by chess. He ends every battle in five moves.',
+    'A lazy student finds every cheat code hidden in the isekai world rules.',
+    'A speedrunner reincarnates and wall-clips through the main quest, finishing 10 years of story in minutes.',
+    'A programmer reincarnates into a magic world. He treats spells as code and patches every kingdom bug.',
+    'A scientist reincarnates into a world with no science. He invents gunpowder on day one.',
+    'The weakest student in magic school secretly copies any skill he sees just once.',
+    'A hero rated F-rank trains alone for 10 years. Nobody was ready for what he became.',
+    'The kingdom trash swordsman could not use magic. He did not need it.',
+    'An adventurer with zero stats accepts every S-rank quest the top heroes refused. He completes them all.',
+    'A healer kicked from the party discovers his ability can destroy entire armies.',
+    'The most feared warrior in history reincarnates as a commoner child. He is bored by level 1.',
+    'An ordinary librarian in the magic academy is secretly the author of every forbidden spell.',
+    'A butler who appears powerless is the only person the demon lord truly fears.',
+    'The village weakest farmer is approached by the king. The whole kingdom survived only because of him.',
+    'A student fails the hero exam 5 times. On attempt 6 the exam itself breaks measuring his power.',
+    'The demon lord reveals his true plan. He was protecting humanity from something worse all along.',
+    'The villain of the story knew the truth. The heroes were the real threat.',
+    'A demon lord sealed for 1000 years wakes to find humans are now the monsters.',
+    'The most evil sorcerer in history was a 12-year-old protecting his village. Nobody asked why.',
+    'A demon general surrenders to the heroes. His reason silences the entire kingdom.',
+    'A hero stuck looping the same day has died 1203 times. Today is finally different.',
+    'A swordsman resets to the same morning every death. He knows every move his enemies will ever make.',
+    'An assassin with a one-time rewind uses it exactly once. It changes everything.',
+    'A student relives the same school year. After 12 loops he is secretly the most powerful person alive.',
+    'A soldier dies in the same battle repeatedly. On loop 500 he discovers why the war started.',
+    'A man wakes with a UI only he can see. Level 1. But the max level is not what anyone expected.',
+    'An adventurer status shows abilities nobody has seen. The system labels him a critical error.',
+    'A dungeon boss gains sentience and optimizes his dungeon to avoid being cleared.',
+    'A player finds a hidden class never meant to exist. The world creators try to delete him.',
+    'An S-rank dungeon spawns a monster that learns from every death. It has died 10000 times.',
+    'A lone samurai walks into a town with 100 bandits. He sheathes his sword before they can draw.',
+    'The greatest swordsman alive refuses to fight. The moment he agrees every king sends assassins.',
+    'A blind swordsman is challenged by the kingdom champion. The duel lasts half a second.',
+    'A retired warrior is called back one last time. He ends a 10-year war in a single afternoon.',
+    'A dragon surrenders to a lone wanderer without a fight. Nobody understands why. The wanderer smiles.',
+    'The most feared demon lord opens a bakery in the human world and just wants five-star reviews.',
+    'An S-rank hero retires to a small village. It immediately becomes the safest place on the continent.',
+    'A dragon who lived 3000 years enrolls in a human magic school. He fails the entrance exam.',
+    'The final dungeon boss has secretly maintained the kingdom infrastructure for 500 years.',
+    'An adventurer reaches the final floor and finds the last boss watching anime. He joins him.',
+    'A new student placed in remedial class casts his first spell and erases an entire mountain.',
+    'An academy dropout hired as janitor is cleaning with magic no professor can explain.',
+    'The top student challenges the transfer student to a duel. It ends in 0.3 seconds.',
 ]
+
+# ── Used-topic deduplication cache ────────────────────────────────────────────
+import json as _json
+
+_USED_TOPICS_FILE = None   # set lazily
+
+def _used_topics_path():
+    global _USED_TOPICS_FILE
+    if _USED_TOPICS_FILE is None:
+        _USED_TOPICS_FILE = config.LOGS_DIR / "used_anime_topics.json"
+    return _USED_TOPICS_FILE
+
+def _load_used() -> set:
+    p = _used_topics_path()
+    if p.exists():
+        try:
+            return set(_json.loads(p.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    return set()
+
+def _mark_used(topic: str):
+    p = _used_topics_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    used = _load_used()
+    used.add(topic[:80])  # normalise to first 80 chars
+    p.write_text(_json.dumps(sorted(used), indent=2), encoding="utf-8")
+
+def _pick_fresh_topic(pool: list) -> str:
+    """Pick a topic not yet used. Resets the cache when all topics are exhausted."""
+    used = _load_used()
+    fresh = [t for t in pool if t[:80] not in used]
+    if not fresh:
+        log.info("All anime topics used — resetting topic cache for variety")
+        p = _used_topics_path()
+        p.unlink(missing_ok=True)
+        fresh = pool
+    topic = random.choice(fresh)
+    _mark_used(topic)
+    return topic
 
 def _evergreen_fallback() -> ViralReference:
     niche = config.CONTENT_NICHE
-    pool  = _ANIME_FALLBACK_TOPICS if niche == "anime" else _FALLBACK_TOPICS
-    topic = random.choice(pool)
+    if niche == "anime":
+        topic = _pick_fresh_topic(_ANIME_FALLBACK_TOPICS)
+    else:
+        topic = random.choice(_FALLBACK_TOPICS)
     log.info(f"🔒 Evergreen fallback [{niche}]: {topic[:70]}...")
     return ViralReference(topic=topic, title=topic, source="fallback")
 
