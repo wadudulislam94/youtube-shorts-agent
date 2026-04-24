@@ -85,6 +85,7 @@ def run_pipeline() -> bool:
             audio_duration=audio_duration,
             topic=topic,
             script=script_result.full_script,
+            hook=getattr(script_result, "hook", ""),
         )
         log.info(f"   Video: {video_path.name}")
 

@@ -46,57 +46,35 @@ def _ass_ts(sec: float) -> str:
     return f"{h}:{m:02d}:{s:05.2f}"
 
 
-def _generate_ass(chunks: List[SubtitleChunk], accent: str, out: Path) -> Path:
+def _generate_ass(chunks: List[SubtitleChunk], accent: str, out: Path, hook: str = "") -> Path:
     """
     Generate .ass subtitle file.
     Routes to anime style or standard style based on CONTENT_NICHE.
     """
     if config.CONTENT_NICHE == "anime":
-        return _generate_ass_anime(chunks, out)
+        return _generate_ass_anime(chunks, out, hook=hook)
     return _generate_ass_standard(chunks, accent, out)
 
 
-def _generate_ass_anime(chunks: List[SubtitleChunk], out: Path) -> Path:
+def _generate_ass_anime(chunks: List[SubtitleChunk], out: Path, hook: str = "") -> Path:
     """
-    Clean, readable streaming-style anime subtitles (Crunchyroll/Netflix style).
+    VIRAL-STYLE anime subtitles — reverse-engineered from 12M+ view Shorts.
 
-    KEY DESIGN:
-    - ONE dialogue event per 5-word phrase  → zero overlapping lines
-    - BorderStyle=3 semi-transparent black box → readable on ANY background
-    - \\kf karaoke: words sweep white→gold as spoken (subtle, not chaotic)
-    - MarginV=320 → sits safely above the bottom edge, never cut off
-    - 96px font — comfortable reading size
+    KEY DESIGN (based on @Anime_Dragons_Den viral style):
+    ─────────────────────────────────────────────────────
+    1. ONE WORD AT A TIME at screen center (y=60% from top)
+       → No box, no karaoke, no phrases. Just the current word, BIG.
+       → 120px bold white, 8px black outline, 5px shadow
+    2. HOOK TITLE pinned at TOP throughout the whole video
+       → Small semi-transparent box at top showing the story hook
+       → Creates constant curiosity: viewer reads hook → wants to see resolution
+    3. Word appears for its natural speech duration (word.start → word.end)
+       → Guaranteed zero overlap: events are strictly sequential
+    4. Subtle scale punch-in on each word (90% → 100% in 60ms)
+       → Adds life without chaos
     """
-    s        = config.ANIME_SUBTITLE
-    font     = s["font"]
-    size     = s["size"]
-    margin_v = s["margin_v"]
-    outline  = s["outline_width"]
-    shadow   = s["shadow_depth"]
-    c_active = s["color_active"]   # gold  — Primary   (word while being spoken)
-    c_text   = s["color_text"]     # white — Secondary (word not yet spoken)
-    c_out    = s["outline_color"]  # black outline
-    c_back   = s["back_color"]     # semi-transparent black box
 
-    # Style: Primary=gold (spoken), Secondary=white (unspoken), BorderStyle=3 (box)
-    # Format: Name Fontname Fontsize PrimaryColour SecondaryColour OutlineColour BackColour
-    #         Bold Italic Underline StrikeOut ScaleX ScaleY Spacing Angle
-    #         BorderStyle Outline Shadow Alignment MarginL MarginR MarginV Encoding
-    header = f"""[Script Info]
-ScriptType: v4.00+
-WrapStyle: 0
-ScaledBorderAndShadow: yes
-PlayResX: 1080
-PlayResY: 1920
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: AnimeKara,{font},{size},{c_active},{c_text},{c_out},{c_back},-1,0,0,0,100,100,1,0,3,{outline},{shadow},2,80,80,{margin_v},1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
-    # ── Collect all unique word timestamps from chunks ────────────────────────
+    # ── Collect & sort all word timestamps ───────────────────────────────────
     seen: set = set()
     all_words = []
     for chunk in chunks:
@@ -107,41 +85,57 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 all_words.append(w)
     all_words.sort(key=lambda w: w.start)
 
-    if not all_words:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(header, encoding="utf-8")
-        return out
+    total_end = (all_words[-1].end + 0.3) if all_words else 60.0
 
-    # ── Group into 5-word phrases ─────────────────────────────────────────────
-    phrase_size = s.get("words_per_line", 5)
-    phrases = [
-        all_words[i : i + phrase_size]
-        for i in range(0, len(all_words), phrase_size)
-    ]
+    # ── ASS header ────────────────────────────────────────────────────────────
+    # Word style: large, centered, white, heavy outline, NO box
+    #   Alignment=2  = bottom-center  → MarginV pushes it UP from the bottom
+    #   MarginV=680  → word sits at (1920-680)=1240px from top = ~64% down
+    #   (This puts the word below the art's focal point, readable but not covering faces)
+    #
+    # Hook style: small, top-center, semi-transparent box background
+    #   Alignment=8  = top-center  → MarginV=90 = 90px from top
+    header = """[Script Info]
+ScriptType: v4.00+
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+PlayResX: 1080
+PlayResY: 1920
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Word,Roboto,118,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,8,5,2,60,60,680,1
+Style: Hook,Roboto,38,&H00FFFFFF,&H000000FF,&H00000000,&H99000000,-1,0,0,0,100,100,0,0,3,2,1,8,100,100,90,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
 
     events = []
-    for phrase in phrases:
-        if not phrase:
+
+    # ── Event 1: Hook title pinned at top ─────────────────────────────────────
+    if hook:
+        # Clean the hook text for ASS (remove commas that break dialogue format)
+        hook_clean = hook.strip().replace("\n", " ").replace(",", ".")[:120]
+        hook_ts = _ass_ts(0.0)
+        hook_te = _ass_ts(total_end)
+        events.append(f"Dialogue: 0,{hook_ts},{hook_te},Hook,,0,0,0,,{hook_clean}")
+
+    # ── Events: ONE word per event, sequential, no overlap ───────────────────
+    if not all_words:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(header + "\n".join(events), encoding="utf-8")
+        return out
+
+    for w in all_words:
+        txt = w.word.strip().upper()
+        if not txt:
             continue
-
-        ts = _ass_ts(phrase[0].start)
-        te = _ass_ts(phrase[-1].end + 0.15)   # small buffer after last word
-
-        # Build \kf karaoke line — ONE event per phrase, no overlap possible
-        kara_parts = []
-        for w in phrase:
-            txt = w.word.strip().upper()
-            if not txt:
-                continue
-            # Duration in centiseconds (100cs = 1 second)
-            dur_cs = max(5, round((w.end - w.start) * 100))
-            kara_parts.append(f"{{\\kf{dur_cs}}}{txt}")
-
-        if not kara_parts:
-            continue
-
-        line = "  ".join(kara_parts)
-        events.append(f"Dialogue: 0,{ts},{te},AnimeKara,,0,0,0,,{line}")
+        ts = _ass_ts(w.start)
+        te = _ass_ts(w.end + 0.05)   # tiny overlap so there's no flash of empty screen
+        # Subtle punch-in: 90%→100% scale in 60ms
+        pfx = r"{\fscx90\fscy90\t(0,60,\fscx100\fscy100)}"
+        events.append(f"Dialogue: 0,{ts},{te},Word,,0,0,0,,{pfx}{txt}")
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(header + "\n".join(events), encoding="utf-8")
@@ -687,6 +681,7 @@ def build_video(
     audio_duration: float,
     topic: str,
     script: str = "",
+    hook: str = "",
 ) -> Path:
     """
     Render a high-retention YouTube Short.
@@ -719,7 +714,7 @@ def build_video(
 
     # ── Step C: Generate ASS subtitles ─────────────────────────────────────
     log.info("🔤 Generating ASS animated subtitles...")
-    _generate_ass(subtitle_chunks, accent, ass_path)
+    _generate_ass(subtitle_chunks, accent, ass_path, hook=hook)
 
     # ── Step D: Find background music (optional) ───────────────────────────
     music = _find_music()
