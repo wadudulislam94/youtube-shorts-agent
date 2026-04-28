@@ -69,22 +69,69 @@ Return ONLY this JSON (no other text):
 }}"""
 
 
-_ANIME_SEO_PROMPT = """You are a YouTube SEO expert specializing in viral Anime Shorts storytelling.
-You study the top 0.1% of anime Shorts channels and know exactly what titles get clicks.
+_ANIME_SEO_PROMPT = """You are a YouTube SEO expert specializing in viral Anime Shorts.
+You study top anime channels with 1M+ subscribers and know exactly what titles get clicks.
 
 Generate SEO metadata for this anime YouTube Short:
 Topic: "{topic}"
 Script excerpt: "{excerpt}"
 
-The channel posts dramatic anime story Shorts. Each Short is an "episode".
-Fans follow to get the NEXT episode. Retention and follows are the main KPIs.
+The channel posts dramatic anime story Shorts. Each video is a self-contained episode.
+
+RETURN VALID JSON. Titles MUST be grammatically correct, natural English.
 
 Return ONLY this JSON (no other text):
 {{
-  "title": "Viral title under 75 characters. Use ONE of these proven viral formats (rotate them, don't always use the same one):\n  - POV format:      'POV: You Reincarnated As The Weakest Hero'\n  - When format:     'When The Trash Hero Speedruns The Demon Lord'\n  - Nobody format:   'Nobody Expected Him To Reach The Final Boss In 3 Minutes'\n  - He/She format:   'He Was Called Trash. Then He Broke The Entire Game'\n  - What If format:  'What If A Gamer Got Isekai'd And Skipped Every Quest'\n  Emoji: rotate from 🔥💫⚡🌀🎯👑🤯✨ — match the mood of the story. No sword emoji every time.",
-  "description": "Use the hook sentence from the script as the first line (copy it exactly). Then 1 sentence of story. Then: 'Episode 2 drops soon — follow so you don't miss it!' End with: #shorts #anime #isekai #animeshorts #animestory #overpoweredmc #reincarnation #weakesthero",
+  "title": "Viral title under 70 characters. MUST use ONE of these proven formats:\n  - 'POV: You Reincarnated As The Weakest Hero' (POV format)\n  - 'When The Trash Hero Speedruns The Demon Lord' (When format)\n  - 'Nobody Expected Him To Break The Entire Game' (Nobody format)\n  - 'He Was Called Trash. Then He Rewrote History.' (He/She format)\n  - 'What If A Gamer Got Isekai'd And Broke Every Rule' (What If format)\n  MANDATORY: Read the title out loud. If it sounds wrong or unnatural, rewrite it.\n  Emoji: pick from 🔥💫⚡🌀🎯👑🤯✨ — match the story mood.",
+  "description": "First line: copy the hook sentence from the script exactly. Second line: 1 sentence teasing what happens. Third line: 'New episode dropping soon — follow so you don't miss it!' End with: #shorts #anime #isekai #animeshorts #animestory #overpoweredmc #weakesthero #shonen",
   "tags": ["anime", "shorts", "animeshorts", "isekai", "overpowered", "reincarnation", "animestory", "weakesthero", "demonlord", "rpg", "gamer", "animerecommendations", "animeexplained", "shonen", "manhwa", "lightnovel", "animeclips", "animemoments", "animenarrative", "viral"]
 }}"""
+
+
+# ── Title Quality Gate ─────────────────────────────────────────────────────────
+
+_ANIME_TITLE_TEMPLATES = [
+    "POV: You Woke Up As The Strongest Being Alive",
+    "Nobody Expected Him To Defeat The Demon Lord This Fast",
+    "He Was Called Trash. Then He Broke The Game.",
+    "When The Weakest Hero Speedruns The Final Dungeon",
+    "What If A Gamer Got Isekai'd And Skipped Every Quest",
+    "He Had 60 Seconds To Win. The World Watched.",
+    "They Called Him Zero. He Became The Only One.",
+]
+
+def _validate_title(title: str, topic: str, niche: str) -> str:
+    """
+    Basic sanity check on AI-generated titles.
+    Rejects titles that are clearly broken and substitutes a template.
+    """
+    if not title or len(title) < 15:
+        log.warning(f"Title too short, using fallback: '{title}'")
+        return _fallback_title(topic, niche)
+
+    # Check for obvious word-level errors (common AI hallucinations)
+    suspicious = ["merts", "mert", "skys", "beautifull", "achivement", "strentgh"]
+    title_lower = title.lower()
+    for bad in suspicious:
+        if bad in title_lower:
+            log.warning(f"Bad grammar detected in title ('{bad}'), using fallback: '{title}'")
+            return _fallback_title(topic, niche)
+
+    # Check title doesn't end mid-word (truncation artifact)
+    if title[-1].isalpha() and len(title) > 65:
+        log.warning(f"Title may be truncated: '{title}'")
+
+    return title
+
+
+def _fallback_title(topic: str, niche: str) -> str:
+    """Generate a safe, grammatically correct fallback title."""
+    import random
+    if niche == "anime":
+        return random.choice(_ANIME_TITLE_TEMPLATES)
+    # Generic fallback
+    words = topic.split()[:6]
+    return "Watch What Happens When " + " ".join(words).title()
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=3, max=15))
@@ -92,6 +139,7 @@ def generate_seo(topic: str, script: str) -> SEOResult:
     """Generate viral SEO metadata using Gemini. Niche-aware."""
     log.info("Generating SEO metadata...")
     niche = config.CONTENT_NICHE
+
 
     if niche == "anime":
         prompt = _ANIME_SEO_PROMPT.format(
@@ -105,10 +153,10 @@ def generate_seo(topic: str, script: str) -> SEOResult:
         )
 
     response = _client.models.generate_content(
-        model="gemini-flash-lite-latest",
+        model="gemini-2.0-flash-lite",
         contents=prompt,
         config=types.GenerateContentConfig(
-            temperature=0.85,
+            temperature=0.75,
             max_output_tokens=512,
             response_mime_type="application/json",
         ),
@@ -125,6 +173,9 @@ def generate_seo(topic: str, script: str) -> SEOResult:
     title       = parsed.get("title", topic[:60]).strip()
     description = parsed.get("description", "").strip()
     tags        = parsed.get("tags", [])
+
+    # Grammar quality gate — reject titles that look broken/unnatural
+    title = _validate_title(title, topic, niche)
 
     # Enforce length limits
     if len(title) > 100:

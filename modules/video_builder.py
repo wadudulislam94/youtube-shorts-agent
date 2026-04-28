@@ -104,8 +104,8 @@ PlayResY: 1920
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Word,Roboto,118,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,8,5,2,60,60,680,1
-Style: Hook,Roboto,38,&H00FFFFFF,&H000000FF,&H00000000,&H99000000,-1,0,0,0,100,100,0,0,3,2,1,8,100,100,90,1
+Style: Word,Roboto Black,130,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,2,0,1,9,6,2,60,60,700,1
+Style: Hook,Roboto,40,&H00FFFFFF,&H000000FF,&H00000000,&HAA000000,-1,0,0,0,100,100,0,0,3,2,1,8,80,80,80,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -132,9 +132,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if not txt:
             continue
         ts = _ass_ts(w.start)
-        te = _ass_ts(w.end + 0.05)   # tiny overlap so there's no flash of empty screen
-        # Subtle punch-in: 90%→100% scale in 60ms
-        pfx = r"{\fscx90\fscy90\t(0,60,\fscx100\fscy100)}"
+        te = _ass_ts(w.end + 0.06)   # tiny overlap so there's no flash of empty screen
+        # Flash yellow→white + scale punch-in for high retention impact
+        # Yellow (&H00FFFF) flashes in first 80ms, then fades to white — eye-catching
+        pfx = r"{\c&H00FFFF&\fscx88\fscy88\t(0,80,\fscx100\fscy100\c&HFFFFFF&)}"
         events.append(f"Dialogue: 0,{ts},{te},Word,,0,0,0,,{pfx}{txt}")
 
     out.parent.mkdir(parents=True, exist_ok=True)
