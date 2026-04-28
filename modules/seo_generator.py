@@ -134,13 +134,21 @@ def _fallback_title(topic: str, niche: str) -> str:
     return "Watch What Happens When " + " ".join(words).title()
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=3, max=15))
 def generate_seo(topic: str, script: str) -> SEOResult:
-    """Generate viral SEO metadata using Gemini. Niche-aware."""
+    """Generate viral SEO metadata using Gemini. Falls back gracefully on API errors."""
     log.info("Generating SEO metadata...")
     niche = config.CONTENT_NICHE
 
+    try:
+        return _generate_seo_via_gemini(topic, script, niche)
+    except Exception as e:
+        log.warning(f"Gemini SEO failed ({type(e).__name__}: {e}) — using safe fallback metadata")
+        return _fallback_seo(topic, script, niche)
 
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=3, max=15))
+def _generate_seo_via_gemini(topic: str, script: str, niche: str) -> SEOResult:
+    """Inner function: calls Gemini for SEO. Retried up to 3x, then raises."""
     if niche == "anime":
         prompt = _ANIME_SEO_PROMPT.format(
             topic=topic,
@@ -168,7 +176,6 @@ def generate_seo(topic: str, script: str) -> SEOResult:
         raise ValueError(f"No JSON in SEO response: {raw[:200]}")
 
     parsed = json.loads(json_match.group())
-    niche = config.CONTENT_NICHE
 
     title       = parsed.get("title", topic[:60]).strip()
     description = parsed.get("description", "").strip()
@@ -191,7 +198,6 @@ def generate_seo(topic: str, script: str) -> SEOResult:
             description += "\n\n#shorts #art #crafts #satisfying #diy"
         base_tags = _BASE_ART_TAGS
 
-    # Merge generated tags with base tags, deduplicate
     all_tags = list(dict.fromkeys(base_tags + [t.lower() for t in tags]))[:30]
 
     result = SEOResult(
@@ -204,3 +210,36 @@ def generate_seo(topic: str, script: str) -> SEOResult:
     log.info(f"SEO ready: {result.title}")
     log.info(f"Tags ({len(result.tags)}): {', '.join(result.tags[:6])}...")
     return result
+
+
+def _fallback_seo(topic: str, script: str, niche: str) -> SEOResult:
+    """
+    Safe fallback SEO when Gemini is unavailable or blocked.
+    Uses template titles so the video still gets uploaded.
+    """
+    import random
+    title = _fallback_title(topic, niche)
+    hook_sentence = script.split(".")[0].strip() if script else topic
+
+    if niche == "anime":
+        description = (
+            f"{hook_sentence}.\n\n"
+            "A new anime story drops every few hours — follow so you never miss an episode!\n\n"
+            "#shorts #anime #isekai #animeshorts #animestory #overpoweredmc #weakesthero #shonen"
+        )
+        base_tags = _BASE_ANIME_TAGS
+    else:
+        description = (
+            f"{hook_sentence}.\n\n"
+            "Follow for daily art inspiration!\n\n"
+            "#shorts #art #crafts #satisfying #diy"
+        )
+        base_tags = _BASE_ART_TAGS
+
+    log.info(f"Fallback SEO title: {title}")
+    return SEOResult(
+        title=title,
+        description=description,
+        tags=base_tags,
+        category_id=CATEGORY_IDS.get(niche, "26"),
+    )
